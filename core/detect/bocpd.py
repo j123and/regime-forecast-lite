@@ -1,4 +1,4 @@
-from .types import Features, DetectorOut
+from ..types import Features, DetectorOut
 
 class BOCPD:
     """Stub with same interface as the real BOCPD; replace logic later."""
