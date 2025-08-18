@@ -6,10 +6,12 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from starlette.responses import Response
 from .schemas import PredictIn, PredictOut
 from core.pipeline import Pipeline
+from core.config import load_config
 
 log = structlog.get_logger()
-app = FastAPI(title="Regime Forecast Service", version="0.2.0")
-pipe = Pipeline()
+app = FastAPI(title="Regime Forecast Service", version="0.3.0")
+CFG = load_config()
+pipe = Pipeline(CFG)
 
 REQS = Counter("requests_total", "Total requests", ["endpoint"])
 LAT = Histogram("latency_ms", "Latency per stage (ms)", ["stage"], buckets=(1,2,5,10,20,50,100,200,500))

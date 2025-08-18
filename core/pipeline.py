@@ -8,10 +8,24 @@ from models.arima import ARIMAModel
 from models.xgb import XGBModel
 
 class Pipeline:
-    def __init__(self) -> None:
-        self.fe = FeatureExtractor()
-        self.det = BOCPD()
-        self.router = Router()
+    def __init__(self, cfg: dict | None = None) -> None:
+        self.cfg = cfg or {}
+        fe_cfg = self.cfg.get('features', {})
+        self.fe = FeatureExtractor(**{k: v for k, v in fe_cfg.items() if k in {'win','rv_win','ewm_alpha'}})
+        dcfg = self.cfg.get('detector', {})
+        self.det = BOCPD(
+            threshold=dcfg.get('threshold', 0.6),
+            cooldown=dcfg.get('cooldown', 5),
+            hazard=dcfg.get('hazard', 1/200),
+            rmax=dcfg.get('rmax', 400),
+            mu0=dcfg.get('mu0', 0.0),
+            kappa0=dcfg.get('kappa0', 1e-3),
+            alpha0=dcfg.get('alpha0', 1.0),
+            beta0=dcfg.get('beta0', 1.0),
+            vol_threshold=dcfg.get('vol_threshold', 0.02),
+        )
+        rcfg = self.cfg.get('router', {})
+        self.router = Router(dwell_min=rcfg.get('dwell_min', 10))
         self.models = {"arima": ARIMAModel(), "xgb": XGBModel()}
         self.conf = OnlineConformal()
 

@@ -10,6 +10,7 @@ Requires-Dist: uvicorn[standard]
 Requires-Dist: pydantic>=2
 Requires-Dist: prometheus-client
 Requires-Dist: structlog
+Requires-Dist: pyyaml
 Provides-Extra: dev
 Requires-Dist: pytest; extra == "dev"
 Requires-Dist: httpx; extra == "dev"

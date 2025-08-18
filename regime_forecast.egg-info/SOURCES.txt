@@ -34,4 +34,6 @@ regime_forecast.egg-info/top_level.txt
 service/__init__.py
 service/app.py
 service/schemas.py
+tests/test_bocpd.py
+tests/test_features.py
 tests/test_smoke.py
