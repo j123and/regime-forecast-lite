@@ -5,9 +5,11 @@ from fastapi import FastAPI
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from starlette.responses import Response
 from .schemas import PredictIn, PredictOut
+from core.pipeline import Pipeline
 
 log = structlog.get_logger()
-app = FastAPI(title="Regime Forecast Service", version="0.1.0")
+app = FastAPI(title="Regime Forecast Service", version="0.2.0")
+pipe = Pipeline()
 
 REQS = Counter("requests_total", "Total requests", ["endpoint"])
 LAT = Histogram("latency_ms", "Latency per stage (ms)", ["stage"], buckets=(1,2,5,10,20,50,100,200,500))
@@ -19,24 +21,6 @@ def timer(stage: str):
         LAT.labels(stage).observe(ms)
         return ms
     return stop
-
-def extract_features(x: float, cov: Dict[str, float]) -> Dict[str, float]:
-    time.sleep(0)
-    return {"z": x, **(cov or {})}
-
-def detect_regime(feats: Dict[str, float]) -> tuple[str, float]:
-    score = min(1.0, abs(feats.get("z", 0.0)) / 2.0)
-    label = "high_vol" if score > 0.5 else "low_vol"
-    return label, score
-
-def route_model(regime: str) -> str:
-    return "xgb" if regime == "high_vol" else "arima"
-
-def forecast(model_name: str, x: float, feats: Dict[str, float]) -> float:
-    return x
-
-def conformal_interval(y_hat: float) -> tuple[float, float]:
-    return y_hat - 0.01, y_hat + 0.01
 
 @app.get("/healthz")
 def healthz() -> Dict[str, str]:
@@ -51,35 +35,37 @@ def metrics() -> Response:
 @app.post("/predict", response_model=PredictOut)
 def predict(inp: PredictIn) -> PredictOut:
     REQS.labels("predict").inc()
-    lat = {}
+    lat: Dict[str, float] = {}
+
+    tick = {"timestamp": inp.timestamp, "x": inp.x, "covariates": inp.covariates or {}}
 
     stop = timer("extract")
-    feats = extract_features(inp.x, inp.covariates or {})
+    feats = pipe.fe.update(tick)
     lat["extract"] = stop()
 
     stop = timer("detect")
-    regime, score = detect_regime(feats)
+    det = pipe.det.update(inp.x, feats)
     lat["detect"] = stop()
 
     stop = timer("route")
-    model = route_model(regime)
+    model_name = pipe.router.choose(det["regime_label"], det["regime_score"])
     lat["route"] = stop()
 
     stop = timer("forecast")
-    y_hat = forecast(model, inp.x, feats)
+    y_hat, _ = pipe.models[model_name].predict_update(tick, feats)
     lat["forecast"] = stop()
 
     stop = timer("conformal")
-    ql, qh = conformal_interval(y_hat)
+    ql, qh = pipe.conf.interval(y_hat, alpha=0.1)
     lat["conformal"] = stop()
 
     lat["total"] = sum(lat.values())
 
     return PredictOut(
-        y_hat=y_hat,
-        interval_low=ql,
-        interval_high=qh,
-        regime=regime,
-        score=score,
+        y_hat=float(y_hat),
+        interval_low=float(ql),
+        interval_high=float(qh),
+        regime=str(det["regime_label"]),
+        score=float(det["regime_score"]),
         latency_ms=lat,
     )
