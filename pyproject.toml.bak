@@ -31,9 +31,3 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
-[tool.setuptools]
-package-dir = {"" = "."}
-
-[tool.setuptools.packages.find]
-include = ["core*", "models*", "service*"]
-exclude = ["tests*", "scripts*", "data*", "config*", "backtest*"]
