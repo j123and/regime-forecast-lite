@@ -1,0 +1,4 @@
+hazard: { type: "constant", lambda: 0.01 }
+detector: { type: "bocpd", threshold: 0.7, cooldown: 5 }
+router: { dwell_min: 10, penalty: 0.5 }
+conformal: { window: 500, alpha_levels: [0.1, 0.05], cap_residual: 10.0 }

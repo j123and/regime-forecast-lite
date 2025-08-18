@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "regime-forecast"
+version = "0.1.0"
+description = "Regime detection + adaptive forecasting (MVP)"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "fastapi",
+  "uvicorn[standard]",
+  "pydantic>=2",
+  "prometheus-client",
+  "structlog"
+]
+[project.optional-dependencies]
+dev = ["pytest","httpx","ruff","mypy","pre-commit"]
