@@ -13,7 +13,7 @@ from data.replay import Replay
 
 
 def _to_float(v: Any) -> float:
-    if isinstance(v, int | float):
+    if isinstance(v, (int, float)):
         return float(v)
     return math.nan
 
@@ -34,14 +34,16 @@ def main() -> None:
     router_penalties = [0.0, 0.05, 0.1]
     freeze_ticks = [0, 3, 5]
 
-    stream = Replay(args.data, covar_cols=["rv", "ewm_vol", "ac1", "z"])
-
+    # IMPORTANT: recreate the stream per combination, otherwise you'll exhaust it
     for h in hazards:
         for thr in thresholds:
             for cd in cooldowns:
                 for rst in router_switch_thresholds:
                     for pen in router_penalties:
                         for frz in freeze_ticks:
+                            # new Replay for each run
+                            stream = Replay(args.data, covar_cols=["rv", "ewm_vol", "ac1", "z"])
+
                             cfg = copy.deepcopy(base)
                             d = cfg.setdefault("detector", {})
                             d["hazard"] = float(h)
@@ -71,13 +73,13 @@ def main() -> None:
                                 "mae",
                                 "smape",
                                 "coverage",
-                                "coverage[low_vol]",
-                                "coverage[high_vol]",
                                 "latency_p50_ms",
                                 "cp_precision",
                                 "cp_recall",
                                 "cp_delay_mean",
+                                "cp_delay_p95",
                                 "cp_chatter_per_1000",
+                                "cp_false_alarm_rate",
                             ]:
                                 out[k] = _to_float(metrics.get(k))
                             print(json.dumps(out))
