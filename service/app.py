@@ -1,102 +1,114 @@
 from __future__ import annotations
 
-import functools
 import subprocess
 import time
-from collections import defaultdict, deque
+from typing import Any
 
 import structlog
 from fastapi import FastAPI
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from starlette.responses import Response
 
 from core.config import load_config
 from core.pipeline import Pipeline
 from core.types import Tick
-from service.schemas import FeedbackIn, FeedbackOut, PredictIn, PredictOut
+from service.schemas import PredictIn, PredictOut
 
 log = structlog.get_logger()
 app = FastAPI()
 
-# Prometheus metrics
 REQS = Counter("requests_total", "Total requests", ["endpoint"])
-LAT = Histogram("latency_ms", "Latency per stage (ms)", ["stage"], buckets=(1, 2, 5, 10, 20, 50, 100, 200, 500))
-COVER_TOTAL = Counter("conformal_total", "Conformal feedback count", ["alpha", "regime"])
-COVER_HIT = Counter("conformal_hit", "Conformal coverage hits", ["alpha", "regime"])
-COVER_ROLL = Gauge("conformal_coverage_rolling", "Rolling coverage (last N feedbacks)", ["alpha", "regime"])
-
-# rolling coverage state
-class _RollingCoverage:
-    def __init__(self, window: int = 500) -> None:
-        self.window = int(window)
-        self._bufs: dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=self.window))
-
-    def update(self, alpha: str, regime: str, hit: bool) -> float:
-        key = (alpha, regime)
-        d = self._bufs[key]
-        d.append(1.0 if hit else 0.0)
-        val = sum(d) / len(d)
-        COVER_ROLL.labels(alpha=alpha, regime=regime).set(val)
-        return val
+LAT = Histogram(
+    "latency_ms", "Latency per stage (ms)", ["stage"], buckets=(1, 2, 5, 10, 20, 50, 100, 200, 500)
+)
 
 cfg = load_config()
 pipe = Pipeline(cfg)
-ROLL = _RollingCoverage(window=int(cfg.get("metrics", {}).get("coverage_roll_window", 500)))
 
-def timer(stage: str):
-    def deco(fn):
-        @functools.wraps(fn)
-        def wrapped(*args, **kwargs):
-            t0 = time.perf_counter()
-            try:
-                return fn(*args, **kwargs)
-            finally:
-                LAT.labels(stage).observe((time.perf_counter() - t0) * 1e3)
-        return wrapped
-    return deco
+
+def _to_float(v: Any, default: float = 0.0) -> float:
+    return float(v) if isinstance(v, int | float) else default
+
+
+def _to_pair(v: Any) -> list[float] | None:
+    if isinstance(v, list | tuple) and len(v) == 2:
+        return [_to_float(v[0]), _to_float(v[1])]
+    return None
+
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     REQS.labels("healthz").inc()
     return {"status": "ok"}
 
+
+@app.get("/config")
+def config_echo() -> dict[str, Any]:
+    REQS.labels("config").inc()
+    return cfg
+
+
 @app.get("/version")
 def version() -> dict[str, str]:
     REQS.labels("version").inc()
     try:
-        sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
-    except Exception:
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:  # noqa: BLE001
         sha = "unknown"
-    return {"version": sha}
+    return {"git_sha": sha}
+
 
 @app.get("/metrics")
-def metrics():
+def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
+
 @app.post("/predict", response_model=PredictOut)
-@timer("predict")
 def predict(inp: PredictIn) -> PredictOut:
     REQS.labels("predict").inc()
-    tick: Tick = {"timestamp": inp.timestamp, "x": float(inp.x), "covariates": dict(inp.covariates)}
-    out = pipe.process(tick)
-    return PredictOut(**out)
+    t0 = time.perf_counter()
 
-@app.post("/feedback", response_model=FeedbackOut)
-@timer("feedback")
-def feedback(inp: FeedbackIn) -> FeedbackOut:
-    """
-    Provide the realized y_true for the PREVIOUS step.
-    This updates conformal residuals and coverage metrics for that step.
-    """
-    REQS.labels("feedback").inc()
-    res = pipe.feedback(inp.y_true)
-    regime = str(res.get("regime", ""))
-    hits = {str(a): bool(v) for a, v in (res.get("hits") or {}).items()}
+    cov = {k: _to_float(v) for k, v in (inp.covariates or {}).items()}
+    tick: Tick = {"timestamp": inp.timestamp, "x": _to_float(inp.x), "covariates": cov}
 
-    for a_str, hit in hits.items():
-        COVER_TOTAL.labels(alpha=a_str, regime=regime).inc()
-        if hit:
-            COVER_HIT.labels(alpha=a_str, regime=regime).inc()
-        ROLL.update(alpha=a_str, regime=regime, hit=hit)
+    pred = pipe.process(tick)
+    t1 = time.perf_counter()
 
-    return FeedbackOut(regime=regime, hits=hits)
+    # latencies
+    lat: dict[str, float] = {}
+    lat_raw = pred.get("latency_ms", {})
+    if isinstance(lat_raw, dict):
+        for k, v in lat_raw.items():
+            if isinstance(v, int | float):
+                lat[k] = float(v)
+    lat["service_ms"] = (t1 - t0) * 1000.0
+
+    # optional multi-α intervals
+    intervals_out: dict[str, list[float]] | None = None
+    raw_intervals = pred.get("intervals")
+    if isinstance(raw_intervals, dict):
+        intervals_out = {}
+        for k, pair in raw_intervals.items():
+            p = _to_pair(pair)
+            if p is not None:
+                intervals_out[k] = p
+
+    out = PredictOut(
+        y_hat=_to_float(pred.get("y_hat")),
+        interval_low=_to_float(pred.get("interval_low")),
+        interval_high=_to_float(pred.get("interval_high")),
+        regime=str(pred.get("regime", "")),
+        score=_to_float(pred.get("score")),
+        latency_ms=lat,
+        warmup=bool(pred.get("warmup", False)),
+        degraded=bool(pred.get("degraded", False)),
+        intervals=intervals_out,
+    )
+    return out
+
+
+@app.post("/truth")
+def truth(y: float) -> dict[str, str]:
+    REQS.labels("truth").inc()
+    pipe.update_truth(_to_float(y))
+    return {"status": "ok"}
