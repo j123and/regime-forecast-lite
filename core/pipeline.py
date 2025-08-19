@@ -41,7 +41,10 @@ class Pipeline:
             high_model=rcfg.get("high_model", "xgb"),
             dwell_min=rcfg.get("dwell_min", 10),
             switch_threshold=rcfg.get("switch_threshold", 0.0),
+            switch_penalty=rcfg.get("switch_penalty", 0.0),
             freeze_on_recent_cp=rcfg.get("freeze_on_recent_cp", False),
+            freeze_ticks=rcfg.get("freeze_ticks", 5),
+            cp_spike_threshold=rcfg.get("cp_spike_threshold", 0.6),
         )
 
         mcfg = self.cfg.get("models", {})
@@ -58,17 +61,11 @@ class Pipeline:
         )
         self._alpha = float(ccfg.get("alpha", 0.1))
 
-        # these are no longer relied on for update_truth alignment,
-        # but we keep them in case other callers use them
         self._last_y_hat: float | None = None
         self._pending_truth_updates: int = 0
         self._warmup_min_res = int(ccfg.get("warmup_min_res", 30))
 
     def update_truth(self, y_true: float, y_hat: float | None = None) -> None:
-        """
-        Update conformal with the residual |y_true - y_hat|.
-        If y_hat is not provided, fall back to the last produced y_hat (not recommended).
-        """
         yh = float(y_hat) if y_hat is not None else (self._last_y_hat if self._last_y_hat is not None else None)
         if yh is None:
             return
