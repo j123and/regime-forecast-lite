@@ -1,4 +1,54 @@
-hazard: { type: "constant", lambda: 0.01 }
-detector: { type: "bocpd", threshold: 0.7, cooldown: 5 }
-router: { dwell_min: 10, penalty: 0.5 }
-conformal: { window: 500, alpha_levels: [0.1, 0.05], cap_residual: 10.0 }
+features:
+  win: 50
+  rv_win: 50
+  ewm_alpha: 0.1
+
+detector:
+  threshold: 0.6
+  cooldown: 5
+  hazard: 0.005         # ~200-tick mean segment
+  rmax: 400
+  mu0: 0.0
+  kappa0: 0.001
+  alpha0: 1.0
+  beta0: 1.0
+  vol_threshold: 0.02
+
+router:
+  low_model: arima
+  high_model: xgb
+  dwell_min: 10
+  switch_threshold: 0.2     # min cp_prob to allow switching
+  switch_penalty: 0.1       # extra margin required when switching away from current
+  freeze_on_recent_cp: true # freeze decisions after spike
+  freeze_ticks: 5           # how long to freeze
+  cp_spike_threshold: 0.6   # cp_prob threshold to trigger freeze
+
+models:
+  arima:
+    window: 500
+    order: [1, 0, 0]
+    seasonal_order: [0, 0, 0, 0]
+    refit_every: 50
+    enforce_stationarity: false
+    enforce_invertibility: false
+    maxiter: 50
+  xgb:
+    window: 5000
+    retrain_every: 50
+    min_train: 200
+    n_estimators: 200
+    max_depth: 5
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_lambda: 1.0
+    random_state: 0
+    n_jobs: 0
+
+conformal:
+  window: 500
+  decay: 1.0
+  cold_scale: 0.0
+  alpha: 0.1
+  warmup_min_res: 30

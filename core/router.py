@@ -1,42 +1,86 @@
 from __future__ import annotations
 
+from typing import Any
+
 
 class Router:
-    """Hard switch with dwell and optional score threshold to block low-confidence flips."""
-    def __init__(self, low_model: str = "arima", high_model: str = "xgb",
-                 dwell_min: int = 10, switch_threshold: float = 0.0,
-                 freeze_on_recent_cp: bool = False) -> None:
+    """
+    Score-aware hard switch with:
+      - dwell: minimum ticks to stay on current model
+      - switch_threshold: minimum regime_score (e.g., cp_prob) to permit switching
+      - switch_penalty: extra margin required only when switching away from current
+      - freeze_on_recent_cp: freeze decisions for `freeze_ticks` after cp_prob spike
+    """
+    def __init__(
+        self,
+        low_model: str = "arima",
+        high_model: str = "xgb",
+        dwell_min: int = 10,
+        switch_threshold: float = 0.0,
+        switch_penalty: float = 0.0,
+        freeze_on_recent_cp: bool = False,
+        freeze_ticks: int = 5,
+        cp_spike_threshold: float = 0.6,
+    ) -> None:
         self.low = low_model
         self.high = high_model
         self.dwell_min = int(dwell_min)
         self.switch_threshold = float(switch_threshold)
+        self.switch_penalty = float(switch_penalty)
         self.freeze_on_recent_cp = bool(freeze_on_recent_cp)
+        self.freeze_ticks = int(freeze_ticks)
+        self.cp_spike_threshold = float(cp_spike_threshold)
+
         self._last: str | None = None
         self._dwell = 0
+        self._freeze = 0
 
-    def choose(self, regime_label: str, regime_score: float, meta: dict | None = None) -> str:
-        want = self.high if regime_label == "high_vol" else self.low
+    def _want(self, regime_label: str) -> str:
+        return self.high if regime_label == "high_vol" else self.low
+
+    def choose(self, regime_label: str, regime_score: float, meta: dict[str, object] | None = None) -> str:
+        m = meta or {}
+
+        # Avoid mypy complaining about float(object): validate the type
+        raw: Any = m.get("cp_prob", 0.0)
+        cp_prob = float(raw) if isinstance(raw, (int, float)) else 0.0
+
+        # trigger freeze after a CP spike
+        if self.freeze_on_recent_cp and cp_prob >= self.cp_spike_threshold:
+            self._freeze = max(self._freeze, self.freeze_ticks)
+
+        want = self._want(regime_label)
+
+        # initial pick
         if self._last is None:
             self._last, self._dwell = want, 1
+            if self._freeze > 0:
+                self._freeze -= 1
             return want
 
-        # Optional freeze right after a CP spike
-        if self.freeze_on_recent_cp and meta and meta.get("recent_cp", False):
+        # freeze: hold current model regardless
+        if self._freeze > 0:
+            self._freeze -= 1
             self._dwell += 1
             return self._last
 
-        # Block switching on low confidence
-        if want != self._last and regime_score < self.switch_threshold:
+        # if staying with same model, just dwell
+        if want == self._last:
             self._dwell += 1
             return self._last
 
-        # Dwell logic
-        if want != self._last and self._dwell < self.dwell_min:
+        # different target: check dwell minimum
+        if self._dwell < self.dwell_min:
             self._dwell += 1
             return self._last
 
-        if want != self._last:
-            self._last, self._dwell = want, 1
-        else:
+        # score-aware gate: require threshold + penalty when switching
+        required = self.switch_threshold + self.switch_penalty
+        if regime_score < required:
             self._dwell += 1
+            return self._last
+
+        # switch approved
+        self._last = want
+        self._dwell = 1
         return self._last

@@ -1,24 +1,39 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 SARIMAX: Any
 SARIMAXResults: Any
+_HAS_SM = False
 
+# Provide a single warning type variable to satisfy mypy.
+# We'll bind it to statsmodels' ConvergenceWarning if available; otherwise a fallback.
 try:
-    from statsmodels.tsa.statespace.sarimax import (
+    from statsmodels.tools.sm_exceptions import (  # type: ignore[import-not-found]
+        ConvergenceWarning as _SMConvergenceWarning,
+    )
+    from statsmodels.tsa.statespace.sarimax import (  # type: ignore[import-not-found]
         SARIMAX as _SARIMAX,
     )
     from statsmodels.tsa.statespace.sarimax import (
         SARIMAXResults as _SARIMAXResults,
     )
+
     SARIMAX = _SARIMAX
     SARIMAXResults = _SARIMAXResults
+    ConvergenceWarningType = _SMConvergenceWarning  # type: ignore[assignment]
     _HAS_SM = True
 except Exception:
     SARIMAX = None
     SARIMAXResults = None
+
+    class _FallbackConvergenceWarning(Warning):
+        pass
+
+    ConvergenceWarningType = _FallbackConvergenceWarning  # type: ignore[assignment]
     _HAS_SM = False
+
 
 def _select_feature_order(feats: dict[str, float] | None, exog_keys: list[str] | None) -> list[str]:
     if exog_keys is not None:
@@ -28,6 +43,7 @@ def _select_feature_order(feats: dict[str, float] | None, exog_keys: list[str] |
     default = ["z", "ewm_vol", "ac1", "rv"]
     present = [k for k in default if k in feats]
     return present if present else sorted(feats.keys())
+
 
 class ARIMAModel:
     """
@@ -86,7 +102,9 @@ class ARIMAModel:
                     enforce_stationarity=self.enforce_stationarity,
                     enforce_invertibility=self.enforce_invertibility,
                 )
-                self._res = model.fit(disp=False, maxiter=self.maxiter)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", ConvergenceWarningType)
+                    self._res = model.fit(disp=False, maxiter=self.maxiter)
                 self._since_refit = 0
                 return True
             except Exception:
