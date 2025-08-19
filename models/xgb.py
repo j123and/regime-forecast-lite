@@ -3,18 +3,22 @@ from __future__ import annotations
 from collections import deque
 from typing import Any
 
+xgb: Any
 try:
-    import xgboost as xgb  # type: ignore[import-not-found]
+    import xgboost as _xgb
+    xgb = _xgb
     _HAS_XGB = True
 except Exception:
-    xgb = None  # type: ignore[assignment]
+    xgb = None
     _HAS_XGB = False
 
+SGDRegressor: Any
 try:
-    from sklearn.linear_model import SGDRegressor  # type: ignore[import-not-found]
+    from sklearn.linear_model import SGDRegressor as _SGDRegressor
+    SGDRegressor = _SGDRegressor
     _HAS_SK = True
 except Exception:
-    SGDRegressor = None  # type: ignore[assignment]
+    SGDRegressor = None
     _HAS_SK = False
 
 def _order(features: dict[str, float], keys: list[str] | None) -> list[str]:
@@ -85,17 +89,17 @@ class XGBModel:
         if n < self.min_train:
             return False
         if self._booster is None or self._ticks_since_retrain >= self.retrain_every:
-            X = list(self._X)
+            x_mat = list(self._X)
             y = list(self._y)
             try:
-                if _HAS_XGB:
-                    model = xgb.XGBRegressor(**self._xgb_kwargs)  # type: ignore[operator]
-                    model.fit(X, y, verbose=False)
+                if _HAS_XGB and xgb is not None:
+                    model = xgb.XGBRegressor(**self._xgb_kwargs)
+                    model.fit(x_mat, y, verbose=False)
                     self._booster = model
                     self._is_xgb = True
-                elif _HAS_SK:
-                    model = SGDRegressor(random_state=0, max_iter=1000, tol=1e-3)  # type: ignore[name-defined]
-                    model.fit(X, y)
+                elif _HAS_SK and SGDRegressor is not None:
+                    model = SGDRegressor(random_state=0, max_iter=1000, tol=1e-3)
+                    model.fit(x_mat, y)
                     self._booster = model
                     self._is_xgb = False
                 else:
@@ -110,7 +114,7 @@ class XGBModel:
                 return False
         return False
 
-    def predict_update(self, tick: dict[str, Any], feats: dict[str, float]) -> tuple[float, dict]:
+    def predict_update(self, tick: dict[str, Any], feats: dict[str, float]) -> tuple[float, dict[str, Any]]:
         x_t = float(tick["x"])
         f_t = self._vec(feats)
 
@@ -123,7 +127,7 @@ class XGBModel:
 
         if self._booster is not None:
             try:
-                y_hat = float(self._booster.predict([f_t])[0])  # type: ignore[call-arg]
+                y_hat = float(self._booster.predict([f_t])[0])
             except Exception:
                 y_hat = x_t
         else:
@@ -131,7 +135,7 @@ class XGBModel:
 
         self._last_feats = f_t
 
-        meta = {
+        meta: dict[str, Any] = {
             "model": "xgb" if self._is_xgb else ("sgd" if self._booster is not None else "naive"),
             "refit": refit,
             "n_train": len(self._y),

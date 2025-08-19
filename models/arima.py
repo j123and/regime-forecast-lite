@@ -2,12 +2,22 @@ from __future__ import annotations
 
 from typing import Any
 
+SARIMAX: Any
+SARIMAXResults: Any
+
 try:
-    from statsmodels.tsa.statespace.sarimax import SARIMAX, SARIMAXResults
+    from statsmodels.tsa.statespace.sarimax import (
+        SARIMAX as _SARIMAX,
+    )
+    from statsmodels.tsa.statespace.sarimax import (
+        SARIMAXResults as _SARIMAXResults,
+    )
+    SARIMAX = _SARIMAX
+    SARIMAXResults = _SARIMAXResults
     _HAS_SM = True
 except Exception:
-    SARIMAX = None  # type: ignore[assignment]
-    SARIMAXResults = None  # type: ignore[assignment]
+    SARIMAX = None
+    SARIMAXResults = None
     _HAS_SM = False
 
 def _select_feature_order(feats: dict[str, float] | None, exog_keys: list[str] | None) -> list[str]:
@@ -50,7 +60,7 @@ class ARIMAModel:
 
         self._y: list[float] = []
         self._X: list[list[float]] = []
-        self._res: SARIMAXResults | None = None  # type: ignore[name-defined]
+        self._res: Any | None = None
         self._since_refit: int = 0
 
     def _vectorize(self, feats: dict[str, float]) -> list[float]:
@@ -59,7 +69,7 @@ class ARIMAModel:
         return [float(feats[k]) for k in self._feat_order] if self._feat_order else []
 
     def _maybe_refit(self) -> bool:
-        if not _HAS_SM:
+        if not _HAS_SM or SARIMAX is None:
             return False
         n = len(self._y)
         if n < max(10, sum(self.order) + 5):
@@ -68,7 +78,7 @@ class ARIMAModel:
             y = self._y[-self.window :]
             x_exog = self._X[-self.window :] if self._feat_order else None
             try:
-                model = SARIMAX(  # type: ignore[misc]
+                model = SARIMAX(
                     y,
                     exog=x_exog,
                     order=self.order,
@@ -76,7 +86,7 @@ class ARIMAModel:
                     enforce_stationarity=self.enforce_stationarity,
                     enforce_invertibility=self.enforce_invertibility,
                 )
-                self._res = model.fit(disp=False, maxiter=self.maxiter)  # type: ignore[assignment]
+                self._res = model.fit(disp=False, maxiter=self.maxiter)
                 self._since_refit = 0
                 return True
             except Exception:
@@ -84,7 +94,7 @@ class ARIMAModel:
                 return False
         return False
 
-    def predict_update(self, tick: dict[str, Any], feats: dict[str, float]) -> tuple[float, dict]:
+    def predict_update(self, tick: dict[str, Any], feats: dict[str, float]) -> tuple[float, dict[str, Any]]:
         x_t = float(tick["x"])
         x_vec = self._vectorize(feats)
 
@@ -99,7 +109,7 @@ class ARIMAModel:
         appended = False
         if _HAS_SM and self._res is not None:
             try:
-                self._res = self._res.append(  # type: ignore[assignment]
+                self._res = self._res.append(
                     endog=[x_t],
                     exog=[x_vec] if self._feat_order else None,
                     refit=False,

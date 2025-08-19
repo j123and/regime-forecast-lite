@@ -37,7 +37,7 @@ class Replay:
                             tick["covariates"][c] = float(row[c])
                     yield tick
         else:
-            import pandas as pd  # type: ignore[import-not-found]
+            import pandas as pd
             df = pd.read_parquet(self.path)
             n = len(df)
             for start in range(0, n, self.batch_size):

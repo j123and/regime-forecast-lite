@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Any, cast
 
 from models.arima import ARIMAModel
 from models.xgb import XGBModel
@@ -45,8 +46,8 @@ class Pipeline:
 
         mcfg = self.cfg.get("models", {})
         self.models: dict[str, OnlineModel] = {
-            "arima": ARIMAModel(**mcfg.get("arima", {})),
-            "xgb": XGBModel(**mcfg.get("xgb", {})),
+            "arima": cast(OnlineModel, ARIMAModel(**mcfg.get("arima", {}))),
+            "xgb": cast(OnlineModel, XGBModel(**mcfg.get("xgb", {}))),
         }
 
         ccfg = self.cfg.get("conformal", {})
@@ -66,7 +67,7 @@ class Pipeline:
             self.conf.update(self._last_y_hat, float(y_true))
             self._pending_truth_updates = max(0, self._pending_truth_updates - 1)
 
-    def process(self, tick: Tick) -> dict[str, float | str | dict[str, float] | bool]:
+    def process(self, tick: Tick) -> dict[str, Any]:
         t0 = time.perf_counter()
 
         t1 = time.perf_counter()

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import time
+
 import structlog
 from fastapi import FastAPI
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
@@ -7,6 +10,7 @@ from starlette.responses import Response
 
 from core.config import load_config
 from core.pipeline import Pipeline
+from core.types import Tick
 from service.schemas import PredictIn, PredictOut
 
 log = structlog.get_logger()
@@ -23,6 +27,14 @@ LAT = Histogram(
 cfg = load_config()
 pipe = Pipeline(cfg=cfg)
 
+def _git_sha() -> str:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except Exception:
+        return "unknown"
+
+BUILD_INFO = {"sha": _git_sha(), "built_at": str(int(time.time()))}
+
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     REQS.labels("healthz").inc()
@@ -32,9 +44,17 @@ def healthz() -> dict[str, str]:
 def metrics() -> Response:
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
+@app.get("/config")
+def get_config() -> dict:
+    return cfg
+
+@app.get("/version")
+def version() -> dict:
+    return BUILD_INFO
+
 @app.post("/predict", response_model=PredictOut)
 def predict(inp: PredictIn) -> PredictOut:
     REQS.labels("predict").inc()
-    tick = {"timestamp": inp.timestamp, "x": inp.x, "covariates": inp.covariates or {}}
-    out = pipe.process(tick)  # type: ignore[arg-type]
-    return PredictOut(**out)  # pydantic validates
+    tick: Tick = {"timestamp": inp.timestamp, "x": float(inp.x), "covariates": dict(inp.covariates or {})}
+    out = pipe.process(tick)
+    return PredictOut(**out)

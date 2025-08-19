@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol, TypedDict, runtime_checkable
+from typing import Any, Protocol, TypedDict, runtime_checkable
 
 
 class Tick(TypedDict):
@@ -18,4 +18,4 @@ class DetectorOut(TypedDict):
 
 @runtime_checkable
 class OnlineModel(Protocol):
-    def predict_update(self, tick: Tick, feats: Features) -> tuple[float, dict]: ...
+    def predict_update(self, tick: Tick, feats: Features) -> tuple[float, dict[str, Any]]: ...
