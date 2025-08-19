@@ -58,14 +58,21 @@ class Pipeline:
         )
         self._alpha = float(ccfg.get("alpha", 0.1))
 
+        # these are no longer relied on for update_truth alignment,
+        # but we keep them in case other callers use them
         self._last_y_hat: float | None = None
         self._pending_truth_updates: int = 0
         self._warmup_min_res = int(ccfg.get("warmup_min_res", 30))
 
-    def update_truth(self, y_true: float) -> None:
-        if self._last_y_hat is not None:
-            self.conf.update(self._last_y_hat, float(y_true))
-            self._pending_truth_updates = max(0, self._pending_truth_updates - 1)
+    def update_truth(self, y_true: float, y_hat: float | None = None) -> None:
+        """
+        Update conformal with the residual |y_true - y_hat|.
+        If y_hat is not provided, fall back to the last produced y_hat (not recommended).
+        """
+        yh = float(y_hat) if y_hat is not None else (self._last_y_hat if self._last_y_hat is not None else None)
+        if yh is None:
+            return
+        self.conf.update(yh, float(y_true))
 
     def process(self, tick: Tick) -> dict[str, Any]:
         t0 = time.perf_counter()

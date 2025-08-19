@@ -3,18 +3,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from .metrics import coverage, latency_p50_p95, mae, rmse, smape
+from backtest.metrics import coverage, latency_p50_p95, mae, rmse, smape
 
 
 class BacktestRunner:
     def __init__(self, alpha: float = 0.1) -> None:
         self.alpha = float(alpha)
 
-    def run(
-        self,
-        pipe,
-        stream: Iterable[dict[str, Any]],
-    ) -> tuple[dict[str, float], list[dict[str, Any]]]:
+    def run(self, pipe, stream: Iterable[dict[str, Any]]) -> tuple[dict[str, float], list[dict[str, Any]]]:
         log: list[dict[str, Any]] = []
         y_true_seq: list[float] = []
         y_pred_seq: list[float] = []
@@ -22,30 +18,51 @@ class BacktestRunner:
         qh_seq: list[float] = []
         lat_seq: list[float] = []
 
-        prev_tick: dict[str, Any] | None = None
         prev_pred: dict[str, Any] | None = None
 
         for tick in stream:
-            out = pipe.process(tick)
-            # finalize previous sample once we know current truth (1-step ahead)
-            if prev_tick is not None and prev_pred is not None:
-                y_true = float(prev_tick["x"])
-                pipe.update_truth(y_true)
-                y_true_seq.append(y_true)
-                y_pred_seq.append(float(prev_pred["y_hat"]))
-                ql_seq.append(float(prev_pred["interval_low"]))
-                qh_seq.append(float(prev_pred["interval_high"]))
-                lat_seq.append(float(prev_pred["latency_ms"]["total"]))
-            log.append({**out, "timestamp": tick["timestamp"], "x": float(tick["x"])})
-            prev_tick, prev_pred = tick, out
+            pred = pipe.process(tick)  # predicts y_{t+1|t}
 
-        metrics: dict[str, float] = {}
-        if y_true_seq:
-            metrics["mae"] = mae(y_true_seq, y_pred_seq)
-            metrics["rmse"] = rmse(y_true_seq, y_pred_seq)
-            metrics["smape"] = smape(y_true_seq, y_pred_seq)
-            metrics["coverage"] = coverage(y_true_seq, ql_seq, qh_seq)
-            lat = latency_p50_p95(lat_seq)
-            metrics["latency_p50_ms"] = lat["p50"]
-            metrics["latency_p95_ms"] = lat["p95"]
-        return metrics, log
+            # score previous prediction against current truth y_t
+            if prev_pred is not None:
+                y_t = float(tick["x"])
+                y_hat_prev = float(prev_pred["y_hat"])
+                ql = float(prev_pred["interval_low"])
+                qh = float(prev_pred["interval_high"])
+                total_ms = float(prev_pred.get("latency_ms", {}).get("total", 0.0))
+
+                y_true_seq.append(y_t)
+                y_pred_seq.append(y_hat_prev)
+                ql_seq.append(ql)
+                qh_seq.append(qh)
+                lat_seq.append(total_ms)
+
+                log.append(
+                    {
+                        "t": tick["timestamp"],
+                        "y_true": y_t,
+                        "y_hat": y_hat_prev,
+                        "ql": ql,
+                        "qh": qh,
+                        "regime": prev_pred.get("regime", ""),
+                        "score": float(prev_pred.get("score", 0.0)),
+                        "lat_ms": total_ms,
+                    }
+                )
+
+                # critical: update conformal with residual for the SAME prediction we just scored
+                pipe.update_truth(y_t, y_hat=y_hat_prev)
+
+            prev_pred = pred
+
+        m = {
+            "mae": mae(y_true_seq, y_pred_seq),
+            "rmse": rmse(y_true_seq, y_pred_seq),
+            "smape": smape(y_true_seq, y_pred_seq),
+            "coverage": coverage(y_true_seq, ql_seq, qh_seq),
+        }
+        p = latency_p50_p95(lat_seq)
+        m["latency_p50_ms"] = p["p50"]
+        m["latency_p95_ms"] = p["p95"]
+
+        return m, log

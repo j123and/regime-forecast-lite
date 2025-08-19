@@ -1,8 +1,11 @@
 from __future__ import annotations
+
 import argparse
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
 
 def _get_close_frame(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
     # If MultiIndex columns (e.g., multiple tickers), slice to this ticker

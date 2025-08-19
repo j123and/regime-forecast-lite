@@ -1,11 +1,13 @@
 from __future__ import annotations
+
 import argparse
 import json
 
+from backtest.runner import BacktestRunner
 from core.config import load_config
 from core.pipeline import Pipeline
 from data.replay import Replay
-from backtest.runner import BacktestRunner
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()

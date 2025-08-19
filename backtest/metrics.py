@@ -5,25 +5,31 @@ from collections.abc import Sequence
 
 
 def mae(y_true: Sequence[float], y_pred: Sequence[float]) -> float:
-    return sum(abs(a - b) for a, b in zip(y_true, y_pred, strict=False)) / max(1, len(y_true))
+    n = len(y_true)
+    if n == 0:
+        return 0.0
+    return sum(abs(a - b) for a, b in zip(y_true, y_pred, strict=False)) / n
 
 def rmse(y_true: Sequence[float], y_pred: Sequence[float]) -> float:
-    return math.sqrt(
-        sum((a - b) ** 2 for a, b in zip(y_true, y_pred, strict=False)) / max(1, len(y_true))
-    )
+    n = len(y_true)
+    if n == 0:
+        return 0.0
+    s = sum((a - b) ** 2 for a, b in zip(y_true, y_pred, strict=False))
+    return math.sqrt(s / n)
 
 def smape(y_true: Sequence[float], y_pred: Sequence[float]) -> float:
+    n = len(y_true)
+    if n == 0:
+        return 0.0
+    eps = 1e-12
     num = 0.0
-    den = 0.0
     for a, f in zip(y_true, y_pred, strict=False):
-        num += abs(f - a)
-        s = abs(a) + abs(f)
-        den += s if s != 0.0 else 1.0
-    return 200.0 * num / den if den > 0 else 0.0
+        num += abs(f - a) / max(abs(a) + abs(f) + eps, eps)
+    return 2.0 * num / n
 
 def coverage(y_true: Sequence[float], lo: Sequence[float], hi: Sequence[float]) -> float:
-    hit = 0
     total = 0
+    hit = 0
     for y, ql, qh in zip(y_true, lo, hi, strict=False):
         total += 1
         if ql <= y <= qh:
@@ -33,14 +39,10 @@ def coverage(y_true: Sequence[float], lo: Sequence[float], hi: Sequence[float]) 
 def latency_p50_p95(latencies_ms: Sequence[float]) -> dict[str, float]:
     if not latencies_ms:
         return {"p50": 0.0, "p95": 0.0}
-    arr = sorted(latencies_ms)
-
-    def pct(p: float) -> float:
-        k = (len(arr) - 1) * p
-        f = math.floor(k)
-        c = min(f + 1, len(arr) - 1)
-        if f == c:
-            return arr[int(k)]
-        return arr[f] + (arr[c] - arr[f]) * (k - f)
-
-    return {"p50": pct(0.5), "p95": pct(0.95)}
+    xs = sorted(float(x) for x in latencies_ms)
+    def _pct(p: float) -> float:
+        if not xs:
+            return 0.0
+        i = max(0, min(len(xs) - 1, int(round((p / 100.0) * (len(xs) - 1)))))
+        return xs[i]
+    return {"p50": _pct(50.0), "p95": _pct(95.0)}
