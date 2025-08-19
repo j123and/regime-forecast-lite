@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, cast
+from typing import cast
 
 from models.arima import ARIMAModel
 from models.xgb import XGBModel
@@ -18,9 +18,7 @@ class Pipeline:
         self.cfg = cfg or {}
 
         fe_cfg = self.cfg.get("features", {})
-        self.fe = FeatureExtractor(
-            **{k: v for k, v in fe_cfg.items() if k in {"win", "rv_win", "ewm_alpha"}}
-        )
+        self.fe = FeatureExtractor(**{k: v for k, v in fe_cfg.items() if k in {"win", "rv_win", "ewm_alpha"}})
 
         dcfg = self.cfg.get("detector", {})
         self.det = BOCPD(
@@ -37,67 +35,71 @@ class Pipeline:
 
         rcfg = self.cfg.get("router", {})
         self.router = Router(
-            low_model=rcfg.get("low_model", "arima"),
-            high_model=rcfg.get("high_model", "xgb"),
             dwell_min=rcfg.get("dwell_min", 10),
             switch_threshold=rcfg.get("switch_threshold", 0.0),
             switch_penalty=rcfg.get("switch_penalty", 0.0),
             freeze_on_recent_cp=rcfg.get("freeze_on_recent_cp", False),
-            freeze_ticks=rcfg.get("freeze_ticks", 5),
-            cp_spike_threshold=rcfg.get("cp_spike_threshold", 0.6),
+            freeze_ticks=rcfg.get("freeze_ticks", 0),
         )
 
-        mcfg = self.cfg.get("models", {})
         self.models: dict[str, OnlineModel] = {
-            "arima": cast(OnlineModel, ARIMAModel(**mcfg.get("arima", {}))),
-            "xgb": cast(OnlineModel, XGBModel(**mcfg.get("xgb", {}))),
+            "arima": cast(OnlineModel, ARIMAModel()),
+            "xgb": cast(OnlineModel, XGBModel()),
         }
 
         ccfg = self.cfg.get("conformal", {})
+        self.alpha_main = float(ccfg.get("alpha_main", 0.1))
+        self.alpha_list: list[float] = list(ccfg.get("alphas", [self.alpha_main]))
         self.conf = OnlineConformal(
             window=ccfg.get("window", 500),
             decay=ccfg.get("decay", 1.0),
-            cold_scale=ccfg.get("cold_scale", 0.0),
+            by_regime=ccfg.get("by_regime", True),
+            cold_scale=ccfg.get("cold_scale", 0.01),
         )
-        self._alpha = float(ccfg.get("alpha", 0.1))
 
+        self._pending_truth_updates = 0
         self._last_y_hat: float | None = None
-        self._pending_truth_updates: int = 0
-        self._warmup_min_res = int(ccfg.get("warmup_min_res", 30))
+        self._last_regime: str | None = None
 
-    def update_truth(self, y_true: float, y_hat: float | None = None) -> None:
-        yh = float(y_hat) if y_hat is not None else (self._last_y_hat if self._last_y_hat is not None else None)
-        if yh is None:
-            return
-        self.conf.update(yh, float(y_true))
+    def update_truth(self, y_true: float) -> None:
+        if self._last_y_hat is not None:
+            self.conf.update(self._last_y_hat, y_true, self._last_regime)
+        self._pending_truth_updates = max(0, self._pending_truth_updates - 1)
 
-    def process(self, tick: Tick) -> dict[str, Any]:
+    def process(self, tick: Tick) -> dict[str, float | str | dict[str, float] | bool | dict[str, tuple[float, float]]]:
         t0 = time.perf_counter()
 
-        t1 = time.perf_counter()
         feats = self.fe.update(tick)
+        t1 = time.perf_counter()
+
+        det = self.det.update(float(tick["x"]), feats)
         t2 = time.perf_counter()
 
-        det = self.det.update(tick["x"], feats)
+        model_name = self.router.choose(det["regime_label"], det["regime_score"], det.get("meta", {}))
         t3 = time.perf_counter()
 
-        model_name = self.router.choose(
-            det["regime_label"], det["regime_score"], det.get("meta", {})
-        )
+        y_hat, _ = self.models[model_name].predict_update(tick, feats)
         t4 = time.perf_counter()
 
-        y_hat, _ = self.models[model_name].predict_update(tick, feats)
+        vol_hint = float(feats.get("ewm_vol") or feats.get("rv") or 0.01)
+        ql, qh = self.conf.interval(y_hat, alpha=self.alpha_main, regime_label=det["regime_label"], scale_hint=vol_hint)
+        multi = self.conf.interval(
+            y_hat, regime_label=det["regime_label"], scale_hint=vol_hint, alphas_multi=self.alpha_list
+        )
         t5 = time.perf_counter()
 
-        ql, qh = self.conf.interval(
-            y_hat, alpha=self._alpha, scale_hint=float(feats.get("ewm_vol", 0.0))
-        )
         self._last_y_hat = float(y_hat)
+        self._last_regime = det["regime_label"]
         self._pending_truth_updates += 1
-        t6 = time.perf_counter()
 
-        warmup = self.conf.n < self._warmup_min_res
-        degraded = bool(det.get("meta", {}).get("error", False))
+        lat = {
+            "features_ms": (t1 - t0) * 1000.0,
+            "detector_ms": (t2 - t1) * 1000.0,
+            "router_ms": (t3 - t2) * 1000.0,
+            "model_ms": (t4 - t3) * 1000.0,
+            "conformal_ms": (t5 - t4) * 1000.0,
+            "total_ms": (t5 - t0) * 1000.0,
+        }
 
         return {
             "y_hat": float(y_hat),
@@ -105,14 +107,7 @@ class Pipeline:
             "interval_high": float(qh),
             "regime": det["regime_label"],
             "score": float(det["regime_score"]),
-            "latency_ms": {
-                "features": (t2 - t1) * 1e3,
-                "detector": (t3 - t2) * 1e3,
-                "router": (t4 - t3) * 1e3,
-                "model": (t5 - t4) * 1e3,
-                "conformal": (t6 - t5) * 1e3,
-                "total": (t6 - t0) * 1e3,
-            },
-            "warmup": warmup,
-            "degraded": degraded,
+            "latency_ms": lat,
+            "warmup": len(self.conf.res_global) < 30,
+            "intervals": multi if isinstance(multi, dict) else {},
         }

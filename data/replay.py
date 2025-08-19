@@ -26,6 +26,7 @@ class Replay:
             import csv
             with open(self.path, newline="") as f:
                 reader = csv.DictReader(f)
+                has_cp = "cp" in (reader.fieldnames or [])
                 for row in reader:
                     tick: dict[str, Any] = {
                         "timestamp": row[self.ts_col],
@@ -35,17 +36,18 @@ class Replay:
                     for c in self.covar_cols:
                         if c in row and row[c] != "":
                             tick["covariates"][c] = float(row[c])
+                    if has_cp:
+                        val = row.get("cp", "")
+                        tick["cp"] = 1 if str(val).strip() in ("1", "true", "True") else 0
                     yield tick
         else:
             import pandas as pd
             df = pd.read_parquet(self.path)
-            n = len(df)
-            for start in range(0, n, self.batch_size):
-                chunk = df.iloc[start : start + self.batch_size]
-                for _, r in chunk.iterrows():
-                    cov = {c: float(r[c]) for c in self.covar_cols if c in chunk.columns}
-                    yield {
-                        "timestamp": str(r[self.ts_col]),
-                        "x": float(r[self.y_col]),
-                        "covariates": cov,
-                    }
+            has_cp = "cp" in df.columns
+            for _, r in df.iterrows():
+                cov = {c: float(r[c]) for c in self.covar_cols if c in df.columns}
+                out: dict[str, Any] = {"timestamp": str(r[self.ts_col]), "x": float(r[self.y_col]), "covariates": cov}
+                if has_cp:
+                    val = r["cp"]
+                    out["cp"] = 1 if str(val).strip() in ("1", "true", "True") else 0
+                yield out

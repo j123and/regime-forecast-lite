@@ -40,12 +40,11 @@ class Router:
 
     def choose(self, regime_label: str, regime_score: float, meta: dict[str, object] | None = None) -> str:
         m = meta or {}
-
-        # Avoid mypy complaining about float(object): validate the type
+        # mypy- and ruff-safe extraction
         raw: Any = m.get("cp_prob", 0.0)
-        cp_prob = float(raw) if isinstance(raw, (int, float)) else 0.0
+        cp_prob = float(raw) if isinstance(raw, int | float) else 0.0
 
-        # trigger freeze after a CP spike
+        # freeze after a CP spike
         if self.freeze_on_recent_cp and cp_prob >= self.cp_spike_threshold:
             self._freeze = max(self._freeze, self.freeze_ticks)
 
@@ -58,29 +57,29 @@ class Router:
                 self._freeze -= 1
             return want
 
-        # freeze: hold current model regardless
+        # freeze: hold current model
         if self._freeze > 0:
             self._freeze -= 1
             self._dwell += 1
             return self._last
 
-        # if staying with same model, just dwell
+        # staying with same model
         if want == self._last:
             self._dwell += 1
             return self._last
 
-        # different target: check dwell minimum
+        # different target: enforce dwell
         if self._dwell < self.dwell_min:
             self._dwell += 1
             return self._last
 
-        # score-aware gate: require threshold + penalty when switching
+        # require threshold + penalty to switch
         required = self.switch_threshold + self.switch_penalty
         if regime_score < required:
             self._dwell += 1
             return self._last
 
-        # switch approved
+        # switch
         self._last = want
         self._dwell = 1
         return self._last

@@ -7,13 +7,10 @@ SARIMAX: Any
 SARIMAXResults: Any
 _HAS_SM = False
 
-# Provide a single warning type variable to satisfy mypy.
-# We'll bind it to statsmodels' ConvergenceWarning if available; otherwise a fallback.
+# Bind a single warning type symbol regardless of statsmodels presence
 try:
-    from statsmodels.tools.sm_exceptions import (  # type: ignore[import-not-found]
-        ConvergenceWarning as _SMConvergenceWarning,
-    )
-    from statsmodels.tsa.statespace.sarimax import (  # type: ignore[import-not-found]
+    from statsmodels.tools.sm_exceptions import ConvergenceWarning as _SMConvergenceWarning
+    from statsmodels.tsa.statespace.sarimax import (
         SARIMAX as _SARIMAX,
     )
     from statsmodels.tsa.statespace.sarimax import (
@@ -22,7 +19,7 @@ try:
 
     SARIMAX = _SARIMAX
     SARIMAXResults = _SARIMAXResults
-    ConvergenceWarningType = _SMConvergenceWarning  # type: ignore[assignment]
+    ConvergenceWarningType = _SMConvergenceWarning
     _HAS_SM = True
 except Exception:
     SARIMAX = None
@@ -31,7 +28,7 @@ except Exception:
     class _FallbackConvergenceWarning(Warning):
         pass
 
-    ConvergenceWarningType = _FallbackConvergenceWarning  # type: ignore[assignment]
+    ConvergenceWarningType = _FallbackConvergenceWarning
     _HAS_SM = False
 
 

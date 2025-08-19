@@ -1,8 +1,7 @@
 detector:
-  # p99 on AAPL ~ 0.1825 → set below that to curb chatter
-  threshold: 0.14
-  hazard: 0.004        # ~1/250, calmer
-  cooldown: 10
+  threshold: 0.045
+  hazard: 0.0125
+  cooldown: 7
   mu0: 0.0
   kappa0: 1.0
   alpha0: 4.0
@@ -10,6 +9,6 @@ detector:
   vol_threshold: 0.02
 router:
   freeze_on_recent_cp: true
-  freeze_ticks: 7
+  freeze_ticks: 5
   switch_threshold: 0.1
   switch_penalty: 0.05
