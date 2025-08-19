@@ -4,7 +4,8 @@ import argparse
 import copy
 import json
 import math
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterable
 
 from backtest.runner import BacktestRunner
 from core.config import load_config
@@ -18,12 +19,37 @@ def _to_float(v: Any) -> float:
     return math.nan
 
 
+def _resolve_data_path(p: str) -> str:
+    cand = Path(p)
+    if cand.exists():
+        return str(cand)
+    base = Path(p).name
+    guess = Path("data") / base
+    if guess.exists():
+        return str(guess)
+    raise FileNotFoundError(f"Data file not found: '{p}' (also tried 'data/{base}')")
+
+
+def _materialize(path: str) -> list[dict[str, Any]]:
+    """Read the replay once into memory so we can reuse across grid points."""
+    return list(Replay(path, covar_cols=["rv", "ewm_vol", "ac1", "z"]))
+
+
+def _iter_rows(rows: list[dict[str, Any]], max_rows: int | None) -> Iterable[dict[str, Any]]:
+    if max_rows is None or max_rows >= len(rows):
+        return rows
+    return rows[:max_rows]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", required=True)
     ap.add_argument("--alpha", type=float, default=0.1)
     ap.add_argument("--cp_tol", type=int, default=10)
+    ap.add_argument("--max_rows", type=int, default=None, help="Optional cap on rows for faster sweeps")
     args = ap.parse_args()
+
+    data_path = _resolve_data_path(args.data)
 
     base = load_config()
 
@@ -34,16 +60,15 @@ def main() -> None:
     router_penalties = [0.0, 0.05, 0.1]
     freeze_ticks = [0, 3, 5]
 
-    # IMPORTANT: recreate the stream per combination, otherwise you'll exhaust it
+    # BIG SPEED-UP: read once
+    rows = _materialize(data_path)
+
     for h in hazards:
         for thr in thresholds:
             for cd in cooldowns:
                 for rst in router_switch_thresholds:
                     for pen in router_penalties:
                         for frz in freeze_ticks:
-                            # new Replay for each run
-                            stream = Replay(args.data, covar_cols=["rv", "ewm_vol", "ac1", "z"])
-
                             cfg = copy.deepcopy(base)
                             d = cfg.setdefault("detector", {})
                             d["hazard"] = float(h)
@@ -57,7 +82,13 @@ def main() -> None:
                             r["freeze_ticks"] = int(frz)
 
                             pipe = Pipeline(cfg)
-                            runner = BacktestRunner(alpha=args.alpha, cp_tol=args.cp_tol)
+                            runner = BacktestRunner(
+                                alpha=args.alpha,
+                                cp_tol=args.cp_tol,
+                                cp_threshold=thr,
+                                cp_cooldown=cd,
+                            )
+                            stream = _iter_rows(rows, args.max_rows)
                             metrics, _ = runner.run(pipe, stream)
 
                             out: dict[str, float | int] = {
