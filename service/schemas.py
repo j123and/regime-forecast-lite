@@ -1,10 +1,12 @@
-from typing import Optional, Dict
+from __future__ import annotations
+
 from pydantic import BaseModel, Field
 
+
 class PredictIn(BaseModel):
-    timestamp: str
+    timestamp: str  # consider timezone-aware datetime
     x: float
-    covariates: Optional[Dict[str, float]] = Field(default_factory=dict)
+    covariates: dict[str, float] | None = Field(default_factory=dict)
 
 class PredictOut(BaseModel):
     y_hat: float
@@ -12,4 +14,6 @@ class PredictOut(BaseModel):
     interval_high: float
     regime: str
     score: float
-    latency_ms: Dict[str, float]
+    latency_ms: dict[str, float]
+    warmup: bool = False
+    degraded: bool = False

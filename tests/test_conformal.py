@@ -1,5 +1,7 @@
 import random
+
 from core.conformal import OnlineConformal
+
 
 def test_online_conformal_coverage_stationary():
     random.seed(0)

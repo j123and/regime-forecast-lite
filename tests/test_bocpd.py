@@ -1,6 +1,8 @@
 from statistics import pstdev
-from core.features import FeatureExtractor
+
 from core.detect.bocpd import BOCPD
+from core.features import FeatureExtractor
+
 
 def test_bocpd_detects_mean_shift_with_small_delay():
     fe = FeatureExtractor(win=20, rv_win=20, ewm_alpha=0.2)

@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 from pathlib import Path
+
 import yaml
+
 
 def load_config(path: str = "config/default.yaml") -> dict:
     p = Path(path)

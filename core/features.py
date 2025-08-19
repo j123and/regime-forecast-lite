@@ -1,9 +1,12 @@
-from collections import deque
-from typing import Deque
+from __future__ import annotations
+
 import math
-from .types import Tick, Features
+from collections import deque
+
+from .types import Features, Tick
 
 _EPS = 1e-12
+_RESERVED = {"z", "ewm_vol", "ac1", "rv"}
 
 class FeatureExtractor:
     """
@@ -19,17 +22,16 @@ class FeatureExtractor:
         self.rv_win = int(rv_win)
         self.ewm_alpha = float(ewm_alpha)
 
-        self.buf: Deque[float] = deque(maxlen=self.win)
+        self.buf: deque[float] = deque(maxlen=self.win)
         self.sum = 0.0
         self.sumsq = 0.0
 
         self.prev_x: float | None = None
-        self.rv_buf: Deque[float] = deque(maxlen=self.rv_win)
+        self.rv_buf: deque[float] = deque(maxlen=self.rv_win)
         self.rv_sum = 0.0
 
         self.ewm_var: float | None = None
 
-    # --- helpers ---
     def _push_x(self, x: float) -> None:
         if len(self.buf) == self.win:
             old = self.buf.popleft()
@@ -81,23 +83,25 @@ class FeatureExtractor:
         den = sum((v - mean) ** 2 for v in xs)
         return float(num / den) if den > _EPS else 0.0
 
-    # --- main update ---
     def update(self, tick: Tick) -> Features:
         x = float(tick["x"])
 
-        # rolling stats
         self._push_x(x)
         mean, std = self._rolling_mean_std()
         z = (x - mean) / std if std > _EPS else 0.0
 
-        # vols & ac1
         rv = self._update_rv(x)
         ewm_vol = self._update_ewm_vol(x)
         ac1 = self._ac1()
 
-        # merge covariates last
         feats: Features = {"z": float(z), "ewm_vol": float(ewm_vol), "ac1": float(ac1), "rv": float(rv)}
-        feats.update(tick.get("covariates", {}))
+
+        # merge covariates without clobbering reserved names
+        cov = tick.get("covariates", {}) or {}
+        for k, v in cov.items():
+            if k in _RESERVED:
+                continue
+            feats[k] = float(v)
 
         self.prev_x = x
         return feats

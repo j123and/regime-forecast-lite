@@ -1,5 +1,6 @@
 from core.features import FeatureExtractor
 
+
 def test_features_stream_constant():
     fe = FeatureExtractor(win=3, rv_win=3, ewm_alpha=0.5)
     for i in range(5):
