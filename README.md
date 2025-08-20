@@ -131,7 +131,17 @@ The sweep materializes the dataset once for speed. Use `--max_rows` to cap workl
 Run locally:
 
 ```bash
-uvicorn service.app:app --reload --port 8000
+python -m data.yahoo_fetch --ticker AAPL --start 2024-01-01 --end 2024-03-01 --interval 1h --field logret --out data/aapl_1h_logret.csv
+
+python -m backtest.cli --data data/aapl_1h_logret.csv --cp_tol 10 --profile market --alpha 0.1
+
+uvicorn service.app:app --port 8000
+
+printf '%s' '{"timestamp":"2024-01-02T10:00:00Z","x":0.001,"covariates":{"rv":0.02,"ewm_vol":0.015,"ac1":0.1,"z":0.0}}' \
+| curl -sS -X POST http://localhost:8000/predict -H 'content-type: application/json' -d @-
+printf '0.0007' | curl -sS -X POST http://localhost:8000/truth -H 'content-type: application/json' --data-binary @-
+curl -sS http://localhost:8000/metrics | head -n 50
+
 ```
 
 Health:
