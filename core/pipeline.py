@@ -75,7 +75,11 @@ class Pipeline:
         det = self.det.update(float(tick["x"]), feats)
         t2 = time.perf_counter()
 
-        model_name = self.router.choose(det["regime_label"], det["regime_score"], det.get("meta", {}))
+        # Ensure meta carries cp_prob (fallback to regime_score) so Router freeze logic works.
+        meta = dict(det.get("meta", {}) or {})
+        meta.setdefault("cp_prob", float(det["regime_score"]))
+
+        model_name = self.router.choose(det["regime_label"], det["regime_score"], meta)
         t3 = time.perf_counter()
 
         y_hat, _ = self.models[model_name].predict_update(tick, feats)

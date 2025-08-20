@@ -9,15 +9,38 @@ description = "Regime detection + adaptive forecasting (MVP)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "fastapi",
-  "uvicorn[standard]",
+  # service
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.23",
   "pydantic>=2",
   "prometheus-client",
   "structlog",
-  "pyyaml"
+  "pyyaml",
+
+  # core / data
+  "numpy>=1.26",
+  "pandas>=2.0",
+  "pyarrow>=14",         # parquet in data.replay
+  "scipy>=1.11",         # statsmodels runtime
+
+  # models (optional at runtime but imported; we provide them so service isn't crippled)
+  "statsmodels>=0.14",
+  "scikit-learn>=1.3",
+  "xgboost>=2.0",
+
+  # data utilities
+  "yfinance>=0.2",
 ]
+
 [project.optional-dependencies]
-dev = ["pytest","httpx","ruff","mypy","pre-commit"]
+dev = [
+  "pytest",
+  "httpx",
+  "ruff",
+  "mypy",
+  "pre-commit",
+]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
@@ -32,6 +55,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+
 [tool.setuptools]
 package-dir = {"" = "."}
 
