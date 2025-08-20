@@ -1,171 +1,220 @@
-# Regime Forecast (online detection + forecast + uncertainty)
 
-Fast, streaming regime detection and short-horizon forecasting with conformal uncertainty. Built for low-latency services (FastAPI) and reproducible backtests.
+# Regime Forecast
 
-## What this does (and doesn’t)
+Streaming regime detection + adaptive forecasting. Includes:
+- Online feature extraction, Bayesian Online Change Point Detection (BOCPD), and a score-aware router.
+- Two online models (SARIMAX and XGBoost/SGD with sliding windows) with leak-free training.
+- Online conformal intervals with decay and optional per-regime buffers.
+- A FastAPI service with Prometheus metrics.
+- Backtest harness and parameter sweep tools.
 
-- Online features (rolling z, EWMA volatility, lag-1 acf, realized vol) with no leakage.
-- BOCPD (Bayesian Online Change Point Detection) with Student-t predictive, constant hazard, cooldown, and numeric guards.
-- Router that switches models by regime with dwell, penalty, and optional freeze after a CP spike.
-- Forecasters:
-  - ARIMA (statsmodels SARIMAX) updated efficiently on a rolling window.
-  - XGB (or scikit-stub fallback) trained on sliding window features.
-- Online conformal intervals (absolute residuals, sliding + optional decay), cold-start policy.
-- Backtest runner with metrics for forecast error, coverage, latency, and CP behavior.
-- Service endpoints: `/predict`, `/healthz`, `/metrics` (Prometheus).
+## Why this exists
 
-Not done yet: HMM alternative detector, soft gating weights, per-regime conformal buffers (planned), plots.
+Markets and other time series flip between low/high volatility. One size fits none. This repo detects regime changes, routes between models, and wraps predictions in calibrated intervals — online, tick by tick.
 
-## Install (dev)
+## Install (dev, WSL recommended)
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -U pip wheel
-pip install -e .
-pip install -U ruff mypy pytest types-PyYAML
-# optional: statsmodels, xgboost, scikit-stub fallback) trained on sliding window features.
-pip install statsmodels xgboost scikit-learn numpy pandas
-```
+pip install -U pip
+pip install -e ".[dev]"
+````
 
-## Run the API
+If you only want the service without dev tools:
 
 ```bash
-uvicorn service.app:app --host 0.0.0.0 --port 8000
+pip install .
 ```
 
-Ping it:
+## Data
+
+Minimum columns:
+
+* `timestamp`: ISO 8601 or epoch string in UTC.
+* `x`: target value (float).
+
+Optional columns used by default covariates:
+
+* `rv`, `ewm_vol`, `ac1`, `z`.
+
+Optional labels:
+
+* `cp` or `is_cp`: 0/1 change point indicator on the **current** tick.
+
+CSV is supported out of the box. Parquet requires `pyarrow` (already a dependency).
+
+Generate a quick dataset:
 
 ```bash
-curl -s localhost:8000/healthz
+python -m data.yahoo_fetch --ticker AAPL --start 2024-01-01 --end 2024-03-01 --interval 1h --field logret --out data/aapl_1h_logret.csv
 ```
 
-Predict (toy):
+Or simulate labeled segments:
 
 ```bash
-curl -s -X POST localhost:8000/predict \
-  -H 'Content-Type: application/json' \
-  -d '{"timestamp":"2024-01-01T00:00:00Z","x":1.23,"covariates":{"rv":0.01}}'
+python -m data.sim_cp --n 4000 --out data/sim_cp.csv
 ```
 
-Exposes Prometheus at `/metrics`.
+## Configuration
 
-## Config profiles
+Configs load from (in order):
 
-Three ways to select config:
+1. `--config path.yaml` (explicit).
+2. `REGIME_CONFIG` env var.
+3. Profile: `--profile sim|market` or `REGIME_PROFILE`, resolved under `config/profiles/<profile>.yaml`.
+4. Fallback `config/default.yaml`.
 
-1. CLI flags in backtests (preferred):
+You can override conformal interval width on the CLI with `--alpha`. That sets `conformal.alpha_main` and ensures it’s in `conformal.alphas`.
 
-   * `--profile sim` or `--profile market`
-   * `--config path/to/custom.yaml`
-2. Env:
+Key config sections:
 
-   * `REGIME_PROFILE=sim` or `REGIME_CONFIG=path/to/custom.yaml`
-3. Default fallback: `config/default.yaml`
+* `features`: `win`, `rv_win`, `ewm_alpha`.
+* `detector`: `threshold`, `cooldown`, `hazard`, `rmax`, `mu0`, `kappa0`, `alpha0`, `beta0`, `vol_threshold`.
+* `router`: `dwell_min`, `switch_threshold`, `switch_penalty`, `freeze_on_recent_cp`, `freeze_ticks`.
+* `conformal`: `alpha_main`, `alphas`, `window`, `decay`, `by_regime`, `cold_scale`.
 
-Profiles live under `config/profiles/`:
+## Backtesting
 
-* `sim.yaml` — synthetic change-point tuning.
-* `market.yaml` — conservative market settings.
-
-## Backtest
-
-Fetch example market data:
+Single run:
 
 ```bash
-python data/yahoo_fetch.py --ticker AAPL --start 2024-01-01 --interval 1h --field logret --out data/aapl_1h_logret.csv
+python backtest/cli.py --data data/aapl_1h_logret.csv --cp_tol 10 --profile market --alpha 0.1 | jq .
 ```
 
-Synthesize labeled CP data:
+Notes:
+
+* `--alpha` controls prediction interval width (e.g., 0.1 => 90% PI).
+* Metrics are computed as **previous prediction vs current truth** (no look-ahead).
+* Change-point metrics compare predicted events from `score` against labels `cp`/`is_cp` with tolerance `--cp_tol`.
+
+Parameter sweep (fast path):
 
 ```bash
-python data/sim_cp.py --out data/sim_cp.csv
+python -m backtest.sweep --data data/aapl_1h_logret.csv --cp_tol 10 --alpha 0.1 --max_rows 5000 > sweep.jsonl
 ```
 
-Run backtests:
+Sweep materializes the dataset once, so it’s orders of magnitude faster. Use `--max_rows` for quick scans.
+
+## Service
+
+Run locally:
 
 ```bash
-# synthetic profile
-python backtest/cli.py --data data/sim_cp.csv --cp_tol 10 --profile sim
-
-# market profile
-python backtest/cli.py --data data/aapl_1h_logret.csv --cp_tol 10 --profile market
+uvicorn service.app:app --reload --port 8000
 ```
 
-What you get back: JSON with MAE/RMSE/sMAPE, coverage (overall and by regime when available), latency p50/p95, and CP stats (pred count, precision/recall if labels exist, chatter, delay, etc.).
-
-Optional sweep:
+Health:
 
 ```bash
-python backtest/sweep.py --data data/sim_cp.csv > sweep.jsonl
+curl -s http://localhost:8000/healthz
 ```
 
-## Repo layout (short)
-
-* `core/`: features, BOCPD, router, conformal, pipeline, types.
-* `models/`: `arima.py`, `xgb.py` (rolling refit/retrain).
-* `service/`: FastAPI app and schemas.
-* `data/`: Yahoo fetcher, synthetic generator, replay iterator.
-* `backtest/`: metrics, runner, CLI, sweep.
-* `config/`: default + `profiles/{sim,market}.yaml`.
-* `.github/workflows/ci.yml`: ruff + mypy + pytest + a sim backtest run.
-
-## Dev workflow
-
-Lint/type/test fast:
+Predict:
 
 ```bash
-ruff check . --fix
+jq -n --arg ts "2024-01-02T10:00:00Z" --argjson x 0.001 \
+  '{timestamp:$ts, x:$x, covariates:{rv:0.02, ewm_vol:0.015, ac1:0.1, z:0.0}}' \
+| curl -s -X POST http://localhost:8000/predict -H 'content-type: application/json' -d @-
+```
+
+Truth feedback:
+
+* Accepts a plain JSON number or an object with `y` or `y_true`.
+
+```bash
+echo 0.0007 | curl -s -X POST http://localhost:8000/truth -H 'content-type: application/json' --data-binary @-
+```
+
+Metrics (Prometheus exposition):
+
+```bash
+curl -s http://localhost:8000/metrics | head
+```
+
+You’ll see `requests_total{endpoint="..."}` and `latency_ms_*` buckets per stage like `features_ms`, `detector_ms`, `router_ms`, `model_ms`, `conformal_ms`, and `service_ms`.
+
+## Docker
+
+Build:
+
+```bash
+docker build -t regime-forecast:latest .
+```
+
+Run:
+
+```bash
+docker run --rm -p 8000:8000 regime-forecast:latest
+```
+
+Use a dev image (installs test/lint tooling):
+
+```bash
+docker build --build-arg INSTALL_DEV=true -t regime-forecast:dev .
+```
+
+## Architecture
+
+Data flow per tick:
+
+1. `FeatureExtractor` updates rolling stats and builds covariates (`z`, `ewm_vol`, `ac1`, `rv`).
+2. `BOCPD` updates change-point posterior and emits a regime label and score.
+3. `Router` chooses `arima` or `xgb` using the regime, score, dwell time, penalties, and optional freeze after a CP spike.
+4. Model predicts `y_hat` for the next tick and updates its internal state. No leakage.
+5. `OnlineConformal` updates with actual residuals as truth arrives and computes intervals for `alpha_main` and any additional alphas.
+
+The backtester aligns **prev\_pred vs current truth** and reports error, coverage, latency, and CP metrics.
+
+## Development workflow
+
+Recommended Git hygiene:
+
+```bash
+git status
+git rev-parse --abbrev-ref HEAD
+# commit in small chunks
+git add -A
+git commit -m "fix: concise message"
+# keep rebasing your branch if it's private; merge if shared
+```
+
+Basic checks:
+
+```bash
+ruff check .
 mypy .
-pytest -q
+pytest
 ```
 
-Backtest smoke:
+## Known limitations
 
-```bash
-python data/sim_cp.py --out data/sim_cp.csv
-python backtest/cli.py --data data/sim_cp.csv --cp_tol 10 --profile sim
-```
-
-## API contract (current)
-
-`POST /predict`
-
-* Input JSON: `{"timestamp": "<ISO-8601>", "x": <float>, "covariates": {<str>: <float>}}`
-* Output JSON: `y_hat`, `interval_low`, `interval_high`, `regime`, `score`, `latency_ms`, plus flags (`warmup`, `degraded`) when applicable.
-
-`GET /healthz` → `{"status":"ok"}`
-
-`GET /metrics` → Prometheus exposition
-
-## Design notes
-
-* BOCPD “CHANGE” transition uses the prior-predictive Student-t (not the run-length predictive). That avoids the classic bug where `p(r=0)` collapses to the hazard.
-* Router has dwell and penalty, and can freeze after a CP spike for N ticks to avoid immediate thrash.
-* Conformal uses weighted absolute residuals with cold-start fallback; it’s approximate coverage under weighting. Rolling coverage is tracked in backtests.
-
-## Performance
-
-* Feature extraction is O(1) per tick (ring buffers), except `ac1` which is currently O(n); fine at small windows.
-* ARIMA uses append/state update where possible and refits every `refit_every`.
-* XGB retrains on a sliding window every `retrain_every`.
-* Latencies are exported in backtests and service.
-
-## Roadmap
-
-* HMM detector (online filter) alternative.
-* Soft gating (score-weighted blend).
-* Per-regime conformal buffers + multi-α in one call.
-* Session manager for multi-series.
-* Plots in backtest (`matplotlib`) and a minimal dashboard.
-* Docker multi-stage build + pinned wheels cache in CI.
+* The service keeps state in-process. Multiple uvicorn workers will not share state; each has its own pipeline. For truly shared state you’d need external storage or a single worker with proper serialization.
+* XGBoost/Statsmodels are optional at runtime but installed here. If they fail to import, models degrade to naive; you’ll still get predictions.
+* Conformal intervals use absolute residuals with optional per-regime buffers; if your data scale is tiny, expect volatile sMAPE.
 
 ## Troubleshooting
 
-* 422 on `/predict`: your payload is malformed; check `timestamp` string and numbers in `covariates`.
-* Coverage ≈ 0.37 on market data: expected until conformal has warmed up; use sim profile for sanity or feed historical truth via backtest or service feedback path.
-* Statsmodels convergence warnings: increase `refit_every`, shorten `window`, or relax priors.
+Intervals too wide or too narrow:
+
+* Tune `conformal.window`, `conformal.decay`, and `--alpha`.
+
+Router flaps too much:
+
+* Increase `router.dwell_min` or `router.switch_penalty`, raise `router.switch_threshold`.
+
+CP metrics are all NaN except `cp_false_alarm_rate`:
+
+* Your dataset has no labeled CPs. That’s expected; precision/recall are undefined without positives.
+
+Sweep is slow:
+
+* Use `--max_rows`.
+* You can also thin hyperparameter grids in `backtest/sweep.py`.
 
 ## License
 
-MIT
+Add a LICENSE file. Right now this repo doesn’t declare one; that’s a problem if you intend to share binaries/images.
+
+```
+```

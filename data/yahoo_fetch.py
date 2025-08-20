@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ def _get_close_frame(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
                 df = df.droplevel(0, axis=1)
     return df
 
+
 def _pick_close_series(df: pd.DataFrame) -> pd.Series:
     for key in ("Close", "Adj Close", "close", "AdjClose"):
         if key in df.columns:
@@ -30,14 +32,18 @@ def _pick_close_series(df: pd.DataFrame) -> pd.Series:
     s = df[num_cols[0]]
     return s.iloc[:, 0] if isinstance(s, pd.DataFrame) else s
 
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ticker", required=True)
     ap.add_argument("--start", default="2023-01-01")
     ap.add_argument("--end", default=None)
-    ap.add_argument("--interval", default="1h",
-                    choices=["1m","2m","5m","15m","30m","60m","90m","1h","1d","5d","1wk","1mo","3mo"])
-    ap.add_argument("--field", default="logret", choices=["close","logret"])
+    ap.add_argument(
+        "--interval",
+        default="1h",
+        choices=["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"],
+    )
+    ap.add_argument("--field", default="logret", choices=["close", "logret"])
     ap.add_argument("--out", default="data/yahoo.csv")
     args = ap.parse_args()
 
@@ -69,8 +75,12 @@ def main() -> None:
     values = ser.to_numpy(dtype="float64").ravel()
 
     out = pd.DataFrame({"timestamp": list(timestamps), "x": values})
-    out.to_csv(args.out, index=False)
-    print(f"wrote {len(out):,} rows to {args.out}")
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(out_path, index=False)
+    print(f"wrote {len(out):,} rows to {out_path}")
+
 
 if __name__ == "__main__":
     main()

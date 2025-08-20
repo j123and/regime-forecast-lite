@@ -24,9 +24,12 @@ class Replay:
         ext = os.path.splitext(self.path)[1].lower()
         if ext == ".csv":
             import csv
+
             with open(self.path, newline="") as f:
                 reader = csv.DictReader(f)
-                has_cp = "cp" in (reader.fieldnames or [])
+                cols = reader.fieldnames or []
+                # support cp or is_cp
+                cp_field = "cp" if "cp" in cols else ("is_cp" if "is_cp" in cols else None)
                 for row in reader:
                     tick: dict[str, Any] = {
                         "timestamp": row[self.ts_col],
@@ -36,18 +39,22 @@ class Replay:
                     for c in self.covar_cols:
                         if c in row and row[c] != "":
                             tick["covariates"][c] = float(row[c])
-                    if has_cp:
-                        val = row.get("cp", "")
-                        tick["cp"] = 1 if str(val).strip() in ("1", "true", "True") else 0
+                    if cp_field is not None:
+                        val = row.get(cp_field, "")
+                        s = str(val).strip()
+                        tick["cp"] = 1 if s in ("1", "true", "True") else 0
                     yield tick
         else:
             import pandas as pd
+
             df = pd.read_parquet(self.path)
-            has_cp = "cp" in df.columns
+            cols = list(df.columns)
+            cp_field = "cp" if "cp" in cols else ("is_cp" if "is_cp" in cols else None)
             for _, r in df.iterrows():
                 cov = {c: float(r[c]) for c in self.covar_cols if c in df.columns}
                 out: dict[str, Any] = {"timestamp": str(r[self.ts_col]), "x": float(r[self.y_col]), "covariates": cov}
-                if has_cp:
-                    val = r["cp"]
-                    out["cp"] = 1 if str(val).strip() in ("1", "true", "True") else 0
+                if cp_field is not None:
+                    val = r[cp_field]
+                    s = str(val).strip()
+                    out["cp"] = 1 if s in ("1", "true", "True") else 0
                 yield out
