@@ -1,7 +1,9 @@
 # core/pipeline.py
 from __future__ import annotations
 
+import json
 import time
+from collections import OrderedDict, deque
 from typing import cast
 
 from models.arima import ARIMAModel
@@ -58,27 +60,66 @@ class Pipeline:
             cold_scale=ccfg.get("cold_scale", 0.01),
         )
 
-        # --- alignment state ---
-        # forecast to be matched with the *next* truth arrival
+        # --- alignment state (legacy FIFO path) ---
         self._yhat_prev: float | None = None
         self._regime_prev: str | None = None
-        # forecast we just produced in process() for the following tick
         self._yhat_next: float | None = None
         self._regime_next: str | None = None
 
+        # --- NEW: pending map for multi-outstanding predictions ---
+        # pred_id -> {"y_hat": float, "regime": str|None}
+        self._pending: "OrderedDict[str, dict]" = OrderedDict()
+        self._pending_cap: int = int(self.cfg.get("pending_cap", 4096))
+
+    # ---------- public API used by the service ----------
+
+    def register_prediction(self, pred_id: str, y_hat: float, regime_label: str | None) -> None:
+        """
+        Register a newly emitted prediction keyed by pred_id so we can match
+        a future /truth by id or pop FIFO for legacy.
+        """
+        self._pending[pred_id] = {"y_hat": float(y_hat), "regime": regime_label}
+        # cap memory
+        while len(self._pending) > self._pending_cap:
+            self._pending.popitem(last=False)  # evict oldest
+
+    def update_truth_by_id(self, pred_id: str, y_true: float) -> bool:
+        """
+        Apply a truth to a specific pending prediction by id.
+        Returns True if applied, False if not found (already applied or evicted).
+        """
+        item = self._pending.pop(pred_id, None)
+        if item is None:
+            return False
+        self.conf.update(float(item["y_hat"]), float(y_true), item.get("regime"))
+        return True
+
+    def pending_count(self) -> int:
+        return len(self._pending)
+
+    # ---------- legacy FIFO path (still supported) ----------
+
     def update_truth(self, y_true: float) -> None:
         """
-        Called with the *current* tick's truth. Must update conformal using the
-        forecast that was produced on the previous process() call.
+        Legacy FIFO alignment: if we have pending ids, pop the oldest and apply.
+        Otherwise, fall back to the previous-pointer scheme.
         """
+        # Prefer proper pending map if available
+        if self._pending:
+            # pop oldest pred_id and apply
+            _, item = self._pending.popitem(last=False)
+            self.conf.update(float(item["y_hat"]), float(y_true), item.get("regime"))
+            return
+
+        # Fallback: pointer-based (compat for old clients/tests)
         if self._yhat_prev is not None:
             self.conf.update(self._yhat_prev, float(y_true), self._regime_prev)
 
-        # advance the pointer: the forecast we made in the last process()
-        # becomes the one to be matched on the next truth
         self._yhat_prev = self._yhat_next
         self._regime_prev = self._regime_next
-        # do not clear _yhat_next here; it will be overwritten on the next process()
+        # _yhat_next/_regime_next will be overwritten on next process()
+
+    # ---------- main processing ----------
 
     def process(self, tick: Tick) -> dict[str, float | str | dict[str, float] | bool | dict[str, tuple[float, float]]]:
         t0 = time.perf_counter()
@@ -99,7 +140,7 @@ class Pipeline:
         model_name = self.router.choose(det["regime_label"], det["regime_score"], meta)
         t3 = time.perf_counter()
 
-        # 4) model predict+update (model is free to update internal state from this tick)
+        # 4) model predict+update (model may update internal state from this tick)
         y_hat, _ = self.models[model_name].predict_update(tick, feats)
         t4 = time.perf_counter()
 
@@ -113,8 +154,7 @@ class Pipeline:
         )
         t5 = time.perf_counter()
 
-        # IMPORTANT: store this forecast as the one to be matched with the *next* truth,
-        # but DO NOT use it to update conformal now. update_truth() will shift pointers.
+        # Store for legacy pointer fallback (doesn't interfere with id-based path)
         self._yhat_next = float(y_hat)
         self._regime_next = det["regime_label"]
 
@@ -137,3 +177,100 @@ class Pipeline:
             "warmup": len(self.conf.res_global) < 30,
             "intervals": multi if isinstance(multi, dict) else {},
         }
+
+    # -------- persistence (snapshot/restore) --------
+
+    def snapshot(self) -> dict:
+        """
+        Return a JSON-serializable snapshot of calibration-critical state.
+        If models expose snapshot(), include their state as well.
+        """
+        c = self.conf
+        snap: dict = {
+            "version": 2,
+            "conformal": {
+                "window": c.window,
+                "decay": c.decay,
+                "by_regime": c.by_regime,
+                "cold_scale": c.cold_scale,
+                "res_global": list(c.res_global),
+                "wts_global": list(c.wts_global),
+                "res_by_regime": {k: list(v) for k, v in getattr(c, "_res_by_regime", {}).items()},
+                "wts_by_regime": {k: list(v) for k, v in getattr(c, "_wts_by_regime", {}).items()},
+            },
+            "router": {
+                "regime_prev": getattr(self, "_regime_prev", None),
+                "regime_next": getattr(self, "_regime_next", None),
+            },
+            "pending": {
+                # store only the values needed to recompute residuals on restore
+                "items": [
+                    {"pred_id": pid, "y_hat": float(v.get("y_hat", 0.0)), "regime": v.get("regime")}
+                    for pid, v in self._pending.items()
+                ]
+            },
+        }
+        # Optional: capture model state
+        model_states: dict[str, dict] = {}
+        for name, m in self.models.items():
+            try:
+                snap_fn = getattr(m, "snapshot", None)
+                if callable(snap_fn):
+                    model_states[name] = snap_fn()  # type: ignore[no-any-return]
+            except Exception:
+                pass
+        if model_states:
+            snap["models"] = model_states
+        return snap
+
+    def restore(self, snap: dict) -> None:
+        """
+        Restore state from snapshot(). Core config stays; buffers/pointers/pending are restored.
+        """
+        if not isinstance(snap, dict):
+            return
+        s_conf = snap.get("conformal", {}) or {}
+        c = self.conf
+
+        # global buffers
+        try:
+            c.res_global = deque(list(s_conf.get("res_global", [])), maxlen=c.window)
+            c.wts_global = deque(list(s_conf.get("wts_global", [])), maxlen=c.window)
+        except Exception:
+            c.res_global = deque(maxlen=c.window)
+            c.wts_global = deque(maxlen=c.window)
+
+        # per-regime
+        if c.by_regime:
+            c._res_by_regime = {}
+            c._wts_by_regime = {}
+            try:
+                for k, arr in (s_conf.get("res_by_regime") or {}).items():
+                    c._res_by_regime[str(k)] = deque(list(arr), maxlen=c.window)
+                for k, arr in (s_conf.get("wts_by_regime") or {}).items():
+                    c._wts_by_regime[str(k)] = deque(list(arr), maxlen=c.window)
+            except Exception:
+                c._res_by_regime = {}
+                c._wts_by_regime = {}
+
+        # pointers
+        r = snap.get("router", {}) or {}
+        self._regime_prev = r.get("regime_prev")
+        self._regime_next = r.get("regime_next")
+        # pending items
+        self._pending = OrderedDict()
+        for it in (snap.get("pending", {}) or {}).get("items", []):
+            pid = str(it.get("pred_id"))
+            if not pid:
+                continue
+            self._pending[pid] = {"y_hat": float(it.get("y_hat", 0.0)), "regime": it.get("regime")}
+        # Optional: models
+        mdl = snap.get("models") or {}
+        for name, state in mdl.items():
+            m = self.models.get(name)
+            try:
+                restore_fn = getattr(m, "restore", None)
+                if m and callable(restore_fn):
+                    restore_fn(state)  # type: ignore[arg-type]
+            except Exception:
+                pass

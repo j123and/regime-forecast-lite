@@ -1,0 +1,1 @@
+{"version": 1, "conformal": {"window": 500, "decay": 1.0, "by_regime": true, "cold_scale": 0.01, "res_global": [], "wts_global": [], "res_by_regime": {}, "wts_by_regime": {}}, "router": {"regime_prev": null, "regime_next": null}, "pending": {"yhat_prev": null, "yhat_next": null}}
