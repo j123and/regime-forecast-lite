@@ -257,6 +257,77 @@ python -m backtest.sweep --data data/aapl_1h_logret.csv --cp_tol 10 --alpha 0.1 
 
 ---
 
+---
+
+## Benchmarks
+
+Environment: WSL2, Python 3.11, `uvicorn` 1 worker (stateful), C=4, N=1000.
+Method: `scripts/bench_light.sh` (curl+xargs), end-to-end HTTP.
+
+* Requests OK: **1000 / 1000**
+* Elapsed: **6.95 s**
+* Throughput: **\~143.9 req/s**
+* Latency: **p50 \~28.2 ms**, **p95 \~148.8 ms**
+* RSS: *(print from script; varies by box)*
+
+How to reproduce:
+
+```bash
+PORT=8000 N=1000 C=4 ./scripts/bench_light.sh
+```
+
+Notes:
+
+* Single worker is deliberate (the service keeps state in-process).
+* HTTP numbers include JSON encode/decode + FastAPI overhead. Internal pipeline timings are lower (see API `latency_ms` fields and the backtest metrics).
+
+## Calibration
+
+We report coverage for α=0.1 (90% PI), rolling coverage, and per-regime coverage.
+α=0.1 achieves ~0.90 coverage after warm-up; p50/p95 pipeline latency ~8/10 ms on this box.
+Quick JSON report:
+
+```bash
+python scripts/calibration_report.py data/aapl_1h_logret.csv
+```
+
+Example output (AAPL 1h, `market` profile):
+
+```
+{
+  "out": "backtest_plot.png",
+  "n_points_plotted": 1000,
+  "metrics": {
+    "mae": 0.005639353119261354,
+    "rmse": 0.008414121952905976, #on AAPL 1h log returns
+    "coverage": 0.9005291005291005,
+    "latency_p50_ms": 7.876808999981222,
+    "latency_p95_ms": 9.795716000098764,
+    "cp_pred_count": 12.0,
+    "cp_chatter_per_1000": 6.349206349206349,
+    "cp_false_alarm_rate": 0.006349206349206349
+  }
+}
+```
+
+Plot (last 1000 points with intervals + regime shading):
+
+```bash
+python scripts/plot_backtest.py \
+  --data data/aapl_1h_logret.csv \
+  --profile market \
+  --alpha 0.1 \
+  --last 1000 \
+  --out backtest_plot.png
+```
+
+Add two screenshots to this section:
+
+* `backtest_plot.png` (truth vs ŷ, shaded regimes, bands)
+* A cropped snippet of the JSON report above (or paste the JSON)
+
+---
+
 ## Metrics, Grafana, Alerts
 
 Prometheus:
