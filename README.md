@@ -234,12 +234,12 @@ Endpoints:
 
 * `POST /truth`
   Body can be a number or object with `y`/`y_true`:
-
+  ```json
   0.0007
   {"y": 0.0007}
   {"y_true": 0.0007}
   {"value": 0.0007}
-
+  ```
 
 * `GET /healthz` → `{"status":"ok"}`
 
