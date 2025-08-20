@@ -182,6 +182,10 @@ python -m backtest.sweep --data data/aapl_1h_logret.csv --cp_tol 10 --alpha 0.1 
 ---
 
 ## API (FastAPI)
+### Alignment & horizon
+
+- One-step ahead only. Each `POST /predict` produces a forecast for the **next tick** after the request `timestamp`.
+- `/truth` currently applies to the **most recent outstanding prediction (FIFO)**. Out-of-order or duplicate truths are not supported and can corrupt calibration. This will change in a future version to require an explicit identifier.
 
 * **Docs / UIs**: `/docs` (Swagger), `/redoc`
 * **Schema**: `/openapi.json` (also see `openapi/explicit-schemas.json` for the liberal `/truth` body)
