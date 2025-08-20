@@ -248,4 +248,4 @@ Sweep slow:
 
 ````
 
-If you insist on keeping `jq` examples, at least preface them with “requires jq”. Otherwise this is ready.
+
