@@ -1,34 +1,39 @@
+
 # Regime Forecast
 
-Online regime detection + adaptive forecasting with calibrated prediction intervals.  
-Built for streaming time-series: detect change points, switch models on the fly, and serve next-tick forecasts with coverage you can trust.
+Online regime detection + adaptive forecasting with calibrated prediction intervals.
+Built for streaming time series: detect change points, switch models on the fly, and serve next-tick forecasts with coverage you can trust.
 
 ## Highlights
 
-- Online feature extraction (`z`, `ewm_vol`, `ac1`, `rv`) with no leakage
-- Bayesian Online Change Point Detection (BOCPD) + score-aware router
-- Two online forecasters out of the box:
-  - SARIMAX (statsmodels) with sparse refits and fast append
-  - Gradient boosting (XGBoost), falling back to `SGDRegressor`, then naïve if libs unavailable
-- Online conformal intervals (per-regime buffers, decay, sliding window)
-- FastAPI service with Prometheus metrics and OpenAPI docs
-- Backtest CLI and hyperparameter sweep (materialized dataset = fast)
-- Dockerfile, GitHub Actions CI, Grafana dashboard JSON, Prometheus alert rules
-- Example dataset and minimal config to get you running in 60 seconds
+* Online feature extraction (`z`, `ewm_vol`, `ac1`, `rv`) with no leakage
+* Bayesian Online Change Point Detection (BOCPD) + score-aware router
+* Two online forecasters out of the box:
+
+  * SARIMAX (statsmodels) with sparse refits and fast append
+  * Gradient boosting (XGBoost), falling back to `SGDRegressor`, then naïve if libs unavailable
+* Online conformal intervals (per-regime buffers, decay, sliding window)
+* FastAPI service with Prometheus metrics and OpenAPI docs
+* Backtest CLI and hyperparameter sweep (materialized dataset = fast)
+* Dockerfile, GitHub Actions CI, Grafana dashboard JSON, Prometheus alert rules
+* Example dataset and minimal config to get you running quickly
 
 ---
 
-## Quickstart (60 seconds)
+## Quickstart
 
 ### 1) Dev install (Python 3.11)
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -e ".[dev]"
-````
+```
 
 ### 2) Backtest on the tiny example
+
+This is a toy; don’t expect calibrated coverage during warm-up.
 
 ```bash
 python -m backtest.cli \
@@ -38,7 +43,7 @@ python -m backtest.cli \
   --alpha 0.1 | python -m json.tool
 ```
 
-### 3) Run the service and hit it once
+### 3) Run the service once
 
 ```bash
 uvicorn service.app:app --reload --port 8000 &
@@ -61,7 +66,7 @@ curl -s -X POST http://localhost:8000/predict -H 'content-type: application/json
 # send truth (plain number is accepted)
 echo 0.0007 | curl -s -X POST http://localhost:8000/truth -H 'content-type: application/json' --data-binary @- | python -m json.tool
 
-# metrics (Prometheus exposition)
+# metrics (Prometheus)
 curl -s http://localhost:8000/metrics | head -n 20
 
 kill $PID
@@ -70,7 +75,8 @@ kill $PID
 ### Optional: use real data
 
 ```bash
-python -m data.yahoo_fetch --ticker AAPL --start 2024-01-01 --end 2024-03-01 --interval 1h --field logret --out data/aapl_1h_logret.csv
+python -m data.yahoo_fetch --ticker AAPL --start 2024-01-01 --end 2024-03-01 \
+  --interval 1h --field logret --out data/aapl_1h_logret.csv
 
 python -m backtest.cli \
   --data data/aapl_1h_logret.csv \
@@ -79,17 +85,19 @@ python -m backtest.cli \
   --alpha 0.1 | python -m json.tool
 ```
 
+> Calibration note: with the `market` profile and α=0.1, coverage is \~0.90 after warm-up on AAPL 1h.
+
 ---
 
-## What this does (in plain English)
+## What this does (plain English)
 
 For each incoming tick `(timestamp, x, covariates)`:
 
-1. **Features**: compute rolling stats and covariates (`z`, `ewm_vol`, `ac1`, `rv`) without peeking ahead.
-2. **Change points**: BOCPD updates its posterior and yields a `regime_label` plus a continuous `regime_score`.
-3. **Routing**: a dwell/penalty/threshold policy picks a model (`arima` or `xgb`), with optional freeze after CP spikes.
-4. **Forecast**: the chosen model produces `y_hat` for the next tick and updates its own state online (no leakage).
-5. **Intervals**: online conformal computes `[interval_low, interval_high]`. As truth arrives on the *next* tick, residual buffers update.
+1. **Features**: compute rolling stats (`z`, `ewm_vol`, `ac1`, `rv`) without peeking ahead.
+2. **Change points**: BOCPD updates its posterior and yields a `regime_label` + continuous `regime_score`.
+3. **Routing**: dwell/penalty/threshold policy picks a model (`arima` or `xgb`), with optional freeze after CP spikes.
+4. **Forecast**: the chosen model outputs `y_hat` for the **next** tick and updates its own state online (no leakage).
+5. **Intervals**: online conformal computes `[interval_low, interval_high]`. On the *next* tick, `/truth` updates residual buffers.
 
 Backtesting aligns **previous prediction vs current truth**, and reports MAE/RMSE/sMAPE/coverage/latency plus change-point metrics.
 
@@ -103,15 +111,17 @@ Backtesting aligns **previous prediction vs current truth**, and reports MAE/RMS
 ---
 
 ## Data format
+
 Timestamps must be UTC. Acceptable inputs:
-- ISO-8601 with trailing `Z`, e.g. `2024-01-02T10:00:00Z`
-- Unix epoch **seconds** as a string, e.g. `"1704180000"`
 
-Timezone offsets (e.g. `+02:00`) are not supported.
+* ISO-8601 with trailing `Z`, e.g., `2024-01-02T10:00:00Z`
+* Unix epoch **seconds** as a string, e.g., `"1704180000"`
 
-Required:
+Timezone offsets (e.g., `+02:00`) are not supported.
 
-* `timestamp` — ISO 8601 string (UTC) or epoch string
+Required columns:
+
+* `timestamp` — ISO-8601 (UTC) or epoch string
 * `x` — target float
 
 Optional covariates (used by default):
@@ -135,7 +145,7 @@ Resolution order:
 3. `--profile sim|market` or `REGIME_PROFILE` → `config/profiles/<profile>.yaml`
 4. Fallback `config/default.yaml`
 
-CLI `--alpha` **overrides** `conformal.alpha_main` and ensures it’s in `conformal.alphas`.
+CLI `--alpha` **overrides** `conformal.alpha_main` and ensures it’s present in `conformal.alphas`.
 
 Minimal example (also in `examples/config/minimal.yaml`):
 
@@ -187,73 +197,69 @@ python -m backtest.sweep --data data/aapl_1h_logret.csv --cp_tol 10 --alpha 0.1 
 ---
 
 ## API (FastAPI)
+
 ### Alignment & horizon
 
-- One-step ahead only. Each `POST /predict` produces a forecast for the **next tick** after the request `timestamp`.
-- `/truth` currently applies to the **most recent outstanding prediction (FIFO)**. Out-of-order or duplicate truths are not supported and can corrupt calibration. This will change in a future version to require an explicit identifier.
+* One-step ahead only. Each `POST /predict` forecasts the **next tick** after the request `timestamp`.
+* `/truth` currently applies to the **most recent outstanding prediction (FIFO)**. Out-of-order or duplicate truths are not supported and can corrupt calibration.
 
-* **Docs / UIs**: `/docs` (Swagger), `/redoc`
-* **Schema**: `/openapi.json` (also see `openapi/explicit-schemas.json` for the liberal `/truth` body)
+**Docs / UIs**: `/docs` (Swagger), `/redoc`
+**Schema**: `/openapi.json` (see also `openapi/explicit-schemas.json` for the liberal `/truth` body)
 
-Endpoints:
+**Endpoints**
 
-* `POST /predict`
-  Request body:
+`POST /predict` — request
 
-  ```json
-  {
-    "timestamp": "2024-01-02T10:00:00Z",
-    "x": 0.001,
-    "covariates": {"rv":0.02,"ewm_vol":0.015,"ac1":0.1,"z":0.0}
-  }
-  ```
+```json
+{
+  "timestamp": "2024-01-02T10:00:00Z",
+  "x": 0.001,
+  "covariates": {"rv":0.02,"ewm_vol":0.015,"ac1":0.1,"z":0.0}
+}
+```
 
-  Response:
+`POST /predict` — response
 
-  ```json
-  {
-    "y_hat": 0.0009,
-    "interval_low": -0.0012,
-    "interval_high": 0.0031,
-    "intervals": {"alpha=0.10":[-0.0012,0.0031]},
-    "regime": "low_vol",
-    "score": 0.42,
-    "latency_ms": {
-      "features_ms": 3.1,
-      "detector_ms": 0.9,
-      "router_ms": 0.1,
-      "model_ms": 1.8,
-      "conformal_ms": 0.3,
-      "service_ms": 6.4
-    },
-    "warmup": false,
-    "degraded": false
-  }
+```json
+{
+  "y_hat": 0.0009,
+  "interval_low": -0.0012,
+  "interval_high": 0.0031,
+  "intervals": {"alpha=0.10":[-0.0012,0.0031]},
+  "regime": "low_vol",
+  "score": 0.42,
+  "latency_ms": {
+    "features_ms": 3.1,
+    "detector_ms": 0.9,
+    "router_ms": 0.1,
+    "model_ms": 1.8,
+    "conformal_ms": 0.3,
+    "service_ms": 6.4
+  },
+  "warmup": false,
+  "degraded": false
+}
+```
 
-  ```
+`POST /truth` — body can be a number or object with `y`/`y_true`/`value`
 
-* `POST /truth`
-  Body can be a number or object with `y`/`y_true`:
-  ```json
-  0.0007
-  {"y": 0.0007}
-  {"y_true": 0.0007}
-  {"value": 0.0007}
-  ```
+```json
+0.0007
+{"y": 0.0007}
+{"y_true": 0.0007}
+{"value": 0.0007}
+```
 
-* `GET /healthz` → `{"status":"ok"}`
-
-* `GET /version` → `{"git_sha":"<commit>" }`
-
-* `GET /config` → current loaded config (as JSON)
-
-* `GET /metrics` → Prometheus exposition
+`GET /healthz` → `{"status":"ok"}`
+`GET /version` → `{"git_sha":"<commit>"}`
+`GET /config` → current loaded config (JSON)
+`GET /metrics` → Prometheus exposition
 
 ---
 
 ## Metrics, Grafana, Alerts
 
-Prometheus counters/histograms:
+Prometheus:
 
 * `requests_total{endpoint="predict|truth|healthz|version|config"}`
 * `latency_ms_bucket{stage="features_ms|detector_ms|router_ms|model_ms|conformal_ms|service_ms"}` (+ `_sum`, `_count`)
@@ -293,11 +299,13 @@ docker run --rm -p 8000:8000 \
 
 ## CI
 
-GitHub Actions workflow at `.github/workflows/ci.yml`:
+GitHub Actions at `.github/workflows/ci.yml`:
 
 * installs deps, runs `ruff` + `mypy` + `pytest`
 * builds Docker image
-* optional publish to GHCR when pushing to `main`
+* optional publish to GHCR on `main`
+
+Optional: add calibration checks (coverage, rolling coverage, latency) to CI; see `scripts/ci_checks.sh` if you include it.
 
 ---
 
@@ -311,7 +319,7 @@ GitHub Actions workflow at `.github/workflows/ci.yml`:
 
 ## Known limitations
 
-* **State is in-process**. Multiple uvicorn workers do not share model/conformal state.
+* **State is in-process**; multiple uvicorn workers do not share model/conformal state.
 * If `statsmodels` / `xgboost` / `scikit-learn` aren’t available, models degrade to naïve but continue serving.
 * Conformal uses absolute residuals; on near-zero series, sMAPE is volatile.
 
