@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import copy
+import itertools
 import json
 import math
-from pathlib import Path
-from typing import Any, Iterable
+import os
+import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Any, Dict, Iterable, List, Tuple
 
 from backtest.runner import BacktestRunner
 from core.config import load_config
@@ -13,46 +16,42 @@ from core.pipeline import Pipeline
 from data.replay import Replay
 
 
-def _to_float(v: Any) -> float:
-    if isinstance(v, (int, float)):
-        return float(v)
-    return math.nan
+# ---------- metrics we care about ----------
+METRIC_KEYS: Tuple[str, ...] = (
+    "rmse",
+    "mae",
+    "smape",
+    "coverage",
+    "latency_p50_ms",
+    "cp_precision",
+    "cp_recall",
+    "cp_delay_mean",
+    "cp_delay_p95",
+    "cp_chatter_per_1000",
+    "cp_false_alarm_rate",
+)
+
+# ---------- cached base config per process ----------
+_BASE_CONFIG = None  # lazily loaded in each worker process
 
 
-def _resolve_data_path(p: str) -> str:
-    cand = Path(p)
-    if cand.exists():
-        return str(cand)
-    base = Path(p).name
-    guess = Path("data") / base
-    if guess.exists():
-        return str(guess)
-    raise FileNotFoundError(f"Data file not found: '{p}' (also tried 'data/{base}')")
+def _get_base_config() -> dict:
+    global _BASE_CONFIG
+    if _BASE_CONFIG is None:
+        _BASE_CONFIG = load_config()
+    return _BASE_CONFIG
 
 
-def _materialize(path: str) -> list[dict[str, Any]]:
-    """Read the replay once into memory so we can reuse across grid points."""
-    return list(Replay(path, covar_cols=["rv", "ewm_vol", "ac1", "z"]))
+def _to_json_safe_float(v: Any) -> float | None:
+    """Return a JSON-friendly float or None (→ null) if not coercible/finite."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
 
 
-def _iter_rows(rows: list[dict[str, Any]], max_rows: int | None) -> Iterable[dict[str, Any]]:
-    if max_rows is None or max_rows >= len(rows):
-        return rows
-    return rows[:max_rows]
-
-
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--data", required=True)
-    ap.add_argument("--alpha", type=float, default=0.1)
-    ap.add_argument("--cp_tol", type=int, default=10)
-    ap.add_argument("--max_rows", type=int, default=None, help="Optional cap on rows for faster sweeps")
-    args = ap.parse_args()
-
-    data_path = _resolve_data_path(args.data)
-
-    base = load_config()
-
+def _combo_iter() -> Iterable[Dict[str, float | int]]:
     hazards = [1 / 500, 1 / 300, 1 / 200, 1 / 120, 1 / 80]
     thresholds = [0.4, 0.5, 0.6, 0.7]
     cooldowns = [3, 5, 10]
@@ -60,60 +59,98 @@ def main() -> None:
     router_penalties = [0.0, 0.05, 0.1]
     freeze_ticks = [0, 3, 5]
 
-    # BIG SPEED-UP: read once
-    rows = _materialize(data_path)
+    for h, thr, cd, rst, pen, frz in itertools.product(
+        hazards,
+        thresholds,
+        cooldowns,
+        router_switch_thresholds,
+        router_penalties,
+        freeze_ticks,
+    ):
+        yield {
+            "hazard": float(h),
+            "threshold": float(thr),
+            "cooldown": int(cd),
+            "router_switch_threshold": float(rst),
+            "router_penalty": float(pen),
+            "freeze_ticks": int(frz),
+        }
 
-    for h in hazards:
-        for thr in thresholds:
-            for cd in cooldowns:
-                for rst in router_switch_thresholds:
-                    for pen in router_penalties:
-                        for frz in freeze_ticks:
-                            cfg = copy.deepcopy(base)
-                            d = cfg.setdefault("detector", {})
-                            d["hazard"] = float(h)
-                            d["threshold"] = float(thr)
-                            d["cooldown"] = int(cd)
 
-                            r = cfg.setdefault("router", {})
-                            r["switch_threshold"] = float(rst)
-                            r["switch_penalty"] = float(pen)
-                            r["freeze_on_recent_cp"] = bool(frz > 0)
-                            r["freeze_ticks"] = int(frz)
+def _run_single(
+    data_path: str,
+    alpha: float,
+    cp_tol: int,
+    combo: Dict[str, float | int],
+) -> str:
+    """
+    Worker: builds Replay/Pipeline/Runner and returns one NDJSON line.
+    Recreates Replay for each run because the stream is consumable.
+    """
+    # Build config from cached base
+    cfg = copy.deepcopy(_get_base_config())
 
-                            pipe = Pipeline(cfg)
-                            runner = BacktestRunner(
-                                alpha=args.alpha,
-                                cp_tol=args.cp_tol,
-                                cp_threshold=thr,
-                                cp_cooldown=cd,
-                            )
-                            stream = _iter_rows(rows, args.max_rows)
-                            metrics, _ = runner.run(pipe, stream)
+    d = cfg.setdefault("detector", {})
+    d["hazard"] = float(combo["hazard"])
+    d["threshold"] = float(combo["threshold"])
+    d["cooldown"] = int(combo["cooldown"])
 
-                            out: dict[str, float | int] = {
-                                "hazard": float(h),
-                                "threshold": float(thr),
-                                "cooldown": int(cd),
-                                "router_switch_threshold": float(rst),
-                                "router_penalty": float(pen),
-                                "freeze_ticks": int(frz),
-                            }
-                            for k in [
-                                "rmse",
-                                "mae",
-                                "smape",
-                                "coverage",
-                                "latency_p50_ms",
-                                "cp_precision",
-                                "cp_recall",
-                                "cp_delay_mean",
-                                "cp_delay_p95",
-                                "cp_chatter_per_1000",
-                                "cp_false_alarm_rate",
-                            ]:
-                                out[k] = _to_float(metrics.get(k))
-                            print(json.dumps(out))
+    r = cfg.setdefault("router", {})
+    r["switch_threshold"] = float(combo["router_switch_threshold"])
+    r["switch_penalty"] = float(combo["router_penalty"])
+    r["freeze_ticks"] = int(combo["freeze_ticks"])
+    r["freeze_on_recent_cp"] = bool(int(combo["freeze_ticks"]) > 0)
+
+    # New replay each time (avoid exhausting the stream)
+    stream = Replay(data_path, covar_cols=["rv", "ewm_vol", "ac1", "z"])
+
+    pipe = Pipeline(cfg)
+    runner = BacktestRunner(alpha=alpha, cp_tol=cp_tol)
+    metrics, _ = runner.run(pipe, stream)
+
+    out: Dict[str, Any] = dict(combo)  # start with hyperparams
+    for k in METRIC_KEYS:
+        out[k] = _to_json_safe_float(metrics.get(k))
+
+    # Strict JSON (nulls instead of NaN), compact separators for throughput
+    return json.dumps(out, separators=(",", ":"))
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", required=True)
+    ap.add_argument("--alpha", type=float, default=0.1)
+    ap.add_argument("--cp_tol", type=int, default=10)
+    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1,
+                    help="Number of parallel workers (default: CPU count)")
+    ap.add_argument("--out", type=str, default="-",
+                    help="Output NDJSON file path or '-' for stdout")
+    args = ap.parse_args()
+
+    combos: List[Dict[str, float | int]] = list(_combo_iter())
+
+    # Output target
+    if args.out == "-" or not args.out:
+        fh = sys.stdout
+        close_fh = False
+    else:
+        fh = open(args.out, "w", buffering=1, encoding="utf-8")  # line-buffered
+        close_fh = True
+
+    try:
+        # Parallel fan-out, stream results as they complete
+        with ProcessPoolExecutor(max_workers=max(1, args.jobs)) as ex:
+            futures = [
+                ex.submit(_run_single, args.data, args.alpha, args.cp_tol, combo)
+                for combo in combos
+            ]
+            for fut in as_completed(futures):
+                line = fut.result()  # will raise if worker failed
+                fh.write(line + "\n")
+                fh.flush()
+    finally:
+        if close_fh:
+            fh.close()
 
 
 if __name__ == "__main__":

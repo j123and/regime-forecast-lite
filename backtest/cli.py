@@ -24,7 +24,7 @@ def _resolve_data_path(p: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", required=True)
-    ap.add_argument("--alpha", type=float, default=0.1)
+    ap.add_argument("--alpha", type=float, default=0.1, help="Interval alpha (e.g., 0.1 for 90% PI)")
     ap.add_argument("--cp_tol", type=int, default=10)
     ap.add_argument(
         "--profile",
@@ -39,7 +39,16 @@ def main() -> None:
 
     data_path = _resolve_data_path(args.data)
 
-    cfg = load_config(path=args.config, profile=args.profile)
+    # load cfg and override conformal alpha with CLI flag
+    cfg = load_config(path=args.config, profile=args.profile) or {}
+    ccfg = cfg.setdefault("conformal", {})
+    ccfg["alpha_main"] = float(args.alpha)
+    # ensure alphas contains alpha_main
+    alphas = list(ccfg.get("alphas", []))
+    if float(args.alpha) not in alphas:
+        alphas.append(float(args.alpha))
+    ccfg["alphas"] = alphas
+
     pipe = Pipeline(cfg)
     runner = BacktestRunner(alpha=args.alpha, cp_tol=args.cp_tol)
 
