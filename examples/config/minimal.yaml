@@ -1,0 +1,26 @@
+features:
+  win: 50
+  rv_win: 50
+  ewm_alpha: 0.1
+
+detector:
+  threshold: 0.6
+  cooldown: 5
+  hazard: 0.005
+  rmax: 400
+  vol_threshold: 0.02
+
+router:
+  dwell_min: 10
+  switch_threshold: 0.0
+  switch_penalty: 0.0
+  freeze_on_recent_cp: false
+  freeze_ticks: 0
+
+conformal:
+  alpha_main: 0.1
+  alphas: [0.1]
+  window: 500
+  decay: 1.0
+  by_regime: true
+  cold_scale: 0.01
