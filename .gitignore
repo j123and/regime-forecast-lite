@@ -11,3 +11,15 @@ data/*.parquet
 
 # local build metadata
 *.egg-info/
+# bench artifacts
+artifacts/bench/**
+!artifacts/bench/summary.json
+!artifacts/bench/env.json
+
+# calibration artifacts
+artifacts/calib/**
+!artifacts/calib/summary.jsonl
+!artifacts/calib/*calibration.json
+
+# plots are large; commit selectively if needed
+*.png

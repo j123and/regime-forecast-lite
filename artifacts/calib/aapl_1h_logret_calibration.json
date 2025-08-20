@@ -1,0 +1,94 @@
+{
+  "dataset": "aapl_1h_logret",
+  "env": {
+    "git_sha": "e33f1320fe69a146871ae390d0783eefd01ba303",
+    "timestamp": "2025-08-20T19:15:44Z",
+    "profile": "market",
+    "config": null,
+    "python": "3.12.3"
+  },
+  "alphas": [
+    0.05,
+    0.1,
+    0.2
+  ],
+  "roll_windows": [
+    200,
+    500
+  ],
+  "per_alpha": {
+    "0.05": {
+      "coverage": 0.9428571428571428,
+      "target": 0.95,
+      "under_coverage_alert": false,
+      "rolling": {
+        "200": 0.935,
+        "500": 0.954
+      },
+      "per_regime": {
+        "high_vol": 0.875,
+        "low_vol": 0.9437299035369775
+      },
+      "miss_split": {
+        "miss_up": 53,
+        "miss_dn": 55,
+        "frac_up": 0.49074074074074076
+      },
+      "mae": 0.005639353119261354,
+      "rmse": 0.008414121952905976,
+      "latency_ms_p50": 8.404901000176324,
+      "latency_ms_p95": 11.50024099933944,
+      "cp_pred_count": 12.0,
+      "cp_false_alarm_rate": 0.006349206349206349
+    },
+    "0.10": {
+      "coverage": 0.9005291005291005,
+      "target": 0.9,
+      "under_coverage_alert": false,
+      "rolling": {
+        "200": 0.885,
+        "500": 0.916
+      },
+      "per_regime": {
+        "high_vol": 0.875,
+        "low_vol": 0.9008574490889604
+      },
+      "miss_split": {
+        "miss_up": 91,
+        "miss_dn": 97,
+        "frac_up": 0.48404255319148937
+      },
+      "mae": 0.005639353119261354,
+      "rmse": 0.008414121952905976,
+      "latency_ms_p50": 7.542865000687016,
+      "latency_ms_p95": 9.333286999208212,
+      "cp_pred_count": 12.0,
+      "cp_false_alarm_rate": 0.006349206349206349
+    },
+    "0.20": {
+      "coverage": 0.8037037037037037,
+      "target": 0.8,
+      "under_coverage_alert": false,
+      "rolling": {
+        "200": 0.795,
+        "500": 0.826
+      },
+      "per_regime": {
+        "high_vol": 0.8333333333333334,
+        "low_vol": 0.8033226152197214
+      },
+      "miss_split": {
+        "miss_up": 180,
+        "miss_dn": 191,
+        "frac_up": 0.48517520215633425
+      },
+      "mae": 0.005639353119261354,
+      "rmse": 0.008414121952905976,
+      "latency_ms_p50": 8.483161999720323,
+      "latency_ms_p95": 11.475991000224894,
+      "cp_pred_count": 12.0,
+      "cp_false_alarm_rate": 0.006349206349206349
+    }
+  },
+  "plot": "artifacts/calib/aapl_1h_logret_alpha0.10.png"
+}

@@ -1,0 +1,61 @@
++ set -euo pipefail
++ PORT=8000
++ URL=http://127.0.0.1:8000/predict
++ TOKEN=s3cr3t
++ N=200
++ CONC_LIST='1 2 4 8 16'
++ OUTDIR=artifacts/bench
++ PIDFILE=/tmp/bench_server.pid
++ START_SERVER=1
++ UVLOOP=1
++ WORKERS=1
++ mkdir -p artifacts/bench/raw artifacts/bench/probe
++ need python
++ command -v python
++ need awk
++ command -v awk
++ need ps
++ command -v ps
++ need sed
++ command -v sed
++ need date
++ command -v date
++ need hey
++ command -v hey
++ start_server
++ '[' 1 '!=' 1 ']'
++ loop_args=()
++ local loop_args
++ '[' 1 = 1 ']'
++ loop_args+=(--loop uvloop --http httptools)
++ UVICORN_CMD=(uvicorn service.app:app --port "$PORT" --workers "$WORKERS" "${loop_args[@]}")
++ echo 'Starting: uvicorn service.app:app --port 8000 --workers 1 --loop uvloop --http httptools'
+Starting: uvicorn service.app:app --port 8000 --workers 1 --loop uvloop --http httptools
++ echo 5666
++ uvicorn service.app:app --port 8000 --workers 1 --loop uvloop --http httptools
++ sleep 1
++ echo URL=http://127.0.0.1:8000/predict
+URL=http://127.0.0.1:8000/predict
++ for C in $CONC_LIST
++ echo '== Concurrency 1 =='
+== Concurrency 1 ==
++ run_one 1
++ local conc=1
++ local raw=artifacts/bench/raw/hey_c1.txt
++ local csv=artifacts/bench/raw/hey_c1.csv
++ local probe=artifacts/bench/probe/proc_c1.txt
++ local REQ_BODY
+++ mktemp
++ REQ_BODY=/tmp/tmp.0Z0KGtw3zr
++ make_body_file /tmp/tmp.0Z0KGtw3zr
++ local out=/tmp/tmp.0Z0KGtw3zr
++ local rand
+++ LC_ALL=C
+++ tr -dc a-z0-9
+++ head -c 6
++ rand=4b57dy
+2025-08-20 22:01:42 [info     ] state_restored                 path=state/snapshot-20250820-200119.json
+INFO:     Started server process [5666]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
