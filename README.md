@@ -1,5 +1,5 @@
 
-````markdown
+
 # Regime Forecast
 
 Streaming regime detection + adaptive forecasting. Includes:
