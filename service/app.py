@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import subprocess
 import time
+from threading import Lock
 from typing import Any
 
 import structlog
-from fastapi import FastAPI
+from fastapi import Body, FastAPI, HTTPException
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from starlette.responses import Response
 
@@ -19,21 +20,42 @@ app = FastAPI()
 
 REQS = Counter("requests_total", "Total requests", ["endpoint"])
 LAT = Histogram(
-    "latency_ms", "Latency per stage (ms)", ["stage"], buckets=(1, 2, 5, 10, 20, 50, 100, 200, 500)
+    "latency_ms",
+    "Latency per stage (ms)",
+    ["stage"],
+    buckets=(1, 2, 5, 10, 20, 50, 100, 200, 500),
 )
 
 cfg = load_config()
 pipe = Pipeline(cfg)
+_lock = Lock()  # stateful pipeline => guard access
 
 
 def _to_float(v: Any, default: float = 0.0) -> float:
-    return float(v) if isinstance(v, int | float) else default
+    # accept ints/floats/strings that look like numbers
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v.strip())
+        except Exception:
+            return default
+    return default
 
 
 def _to_pair(v: Any) -> list[float] | None:
-    if isinstance(v, list | tuple) and len(v) == 2:
+    if isinstance(v, (list, tuple)) and len(v) == 2:
         return [_to_float(v[0]), _to_float(v[1])]
     return None
+
+
+def _observe_latencies(lat: dict[str, float]) -> None:
+    for stage, ms in lat.items():
+        try:
+            LAT.labels(stage).observe(float(ms))
+        except Exception:
+            # never let metrics blow up the request path
+            pass
 
 
 @app.get("/healthz")
@@ -71,7 +93,9 @@ def predict(inp: PredictIn) -> PredictOut:
     cov = {k: _to_float(v) for k, v in (inp.covariates or {}).items()}
     tick: Tick = {"timestamp": inp.timestamp, "x": _to_float(inp.x), "covariates": cov}
 
-    pred = pipe.process(tick)
+    with _lock:
+        pred = pipe.process(tick)
+
     t1 = time.perf_counter()
 
     # latencies
@@ -79,9 +103,10 @@ def predict(inp: PredictIn) -> PredictOut:
     lat_raw = pred.get("latency_ms", {})
     if isinstance(lat_raw, dict):
         for k, v in lat_raw.items():
-            if isinstance(v, int | float):
+            if isinstance(v, (int, float)):
                 lat[k] = float(v)
     lat["service_ms"] = (t1 - t0) * 1000.0
+    _observe_latencies(lat)
 
     # optional multi-α intervals
     intervals_out: dict[str, list[float]] | None = None
@@ -108,7 +133,27 @@ def predict(inp: PredictIn) -> PredictOut:
 
 
 @app.post("/truth")
-def truth(y: float) -> dict[str, str]:
+def truth(payload: Any = Body(...)) -> dict[str, str]:
+    """
+    Accepts either a plain JSON number (e.g., 0.0005) or an object with 'y' or 'y_true'.
+    """
     REQS.labels("truth").inc()
-    pipe.update_truth(_to_float(y))
+
+    y_val: float | None = None
+    if isinstance(payload, (int, float, str)):
+        y_val = _to_float(payload)
+    elif isinstance(payload, dict):
+        for k in ("y", "y_true", "value"):
+            if k in payload:
+                y_val = _to_float(payload[k])
+                break
+
+    if y_val is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Body must be a JSON number or an object containing 'y' or 'y_true'.",
+        )
+
+    with _lock:
+        pipe.update_truth(y_val)
     return {"status": "ok"}
