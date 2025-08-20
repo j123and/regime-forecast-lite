@@ -257,7 +257,6 @@ python -m backtest.sweep --data data/aapl_1h_logret.csv --cp_tol 10 --alpha 0.1 
 
 ---
 
----
 
 ## Benchmarks
 
@@ -320,8 +319,6 @@ python scripts/plot_backtest.py \
   --last 1000 \
   --out backtest_plot.png
 ```
-
-Add two screenshots to this section:
 
 ![Backtest plot](backtest_plot.png)
 * A cropped snippet of the JSON report above (or paste the JSON)
