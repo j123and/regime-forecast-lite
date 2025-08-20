@@ -211,24 +211,24 @@ Endpoints:
   Response:
 
   ```json
-{
-  "y_hat": 0.0009,
-  "interval_low": -0.0012,
-  "interval_high": 0.0031,
-  "intervals": {"alpha=0.10":[-0.0012,0.0031]},
-  "regime": "low_vol",
-  "score": 0.42,
-  "latency_ms": {
-    "features_ms": 3.1,
-    "detector_ms": 0.9,
-    "router_ms": 0.1,
-    "model_ms": 1.8,
-    "conformal_ms": 0.3,
-    "service_ms": 6.4
-  },
-  "warmup": false,
-  "degraded": false
-}
+  {
+    "y_hat": 0.0009,
+    "interval_low": -0.0012,
+    "interval_high": 0.0031,
+    "intervals": {"alpha=0.10":[-0.0012,0.0031]},
+    "regime": "low_vol",
+    "score": 0.42,
+    "latency_ms": {
+      "features_ms": 3.1,
+      "detector_ms": 0.9,
+      "router_ms": 0.1,
+      "model_ms": 1.8,
+      "conformal_ms": 0.3,
+      "service_ms": 6.4
+    },
+    "warmup": false,
+    "degraded": false
+  }
 
   ```
 
