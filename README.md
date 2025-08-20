@@ -323,7 +323,7 @@ python scripts/plot_backtest.py \
 
 Add two screenshots to this section:
 
-* `backtest_plot.png` (truth vs ŷ, shaded regimes, bands)
+![Backtest plot](backtest_plot.png)
 * A cropped snippet of the JSON report above (or paste the JSON)
 
 ---
