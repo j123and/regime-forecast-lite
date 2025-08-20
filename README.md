@@ -1,25 +1,26 @@
-
-
 # Regime Forecast
 
-Streaming regime detection + adaptive forecasting. Includes:
-- Online feature extraction, Bayesian Online Change Point Detection (BOCPD), and a score-aware router.
-- Two online models (SARIMAX and XGBoost/SGD with sliding windows) with leak-free training.
-- Online conformal intervals with decay and optional per-regime buffers.
-- A FastAPI service with Prometheus metrics.
-- Backtest harness and parameter sweep tools.
+Online regime detection + adaptive forecasting with calibrated prediction intervals.  
+Built for streaming time-series: detect change points, switch models on the fly, and serve next-tick forecasts with coverage you can trust.
 
-## Requirements
+## Highlights
 
-- Python 3.11
-- Linux/macOS/WSL recommended (Dockerfile is provided)
+- Online feature extraction (`z`, `ewm_vol`, `ac1`, `rv`) with no leakage
+- Bayesian Online Change Point Detection (BOCPD) + score-aware router
+- Two online forecasters out of the box:
+  - SARIMAX (statsmodels) with sparse refits and fast append
+  - Gradient boosting (XGBoost), falling back to `SGDRegressor`, then naïve if libs unavailable
+- Online conformal intervals (per-regime buffers, decay, sliding window)
+- FastAPI service with Prometheus metrics and OpenAPI docs
+- Backtest CLI and hyperparameter sweep (materialized dataset = fast)
+- Dockerfile, GitHub Actions CI, Grafana dashboard JSON, Prometheus alert rules
+- Example dataset and minimal config to get you running in 60 seconds
 
-## Why this exists
+---
 
-Markets and other time series flip between low/high volatility. One size fits none. This repo detects regime changes, routes between models, and wraps predictions in calibrated intervals — online, tick by tick.
+## Quickstart (60 seconds)
 
-## Install (dev)
-
+### 1) Dev install (Python 3.11)
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
@@ -27,53 +28,111 @@ pip install -U pip
 pip install -e ".[dev]"
 ````
 
-Minimal (runtime only):
+### 2) Backtest on the tiny example
 
 ```bash
-pip install .
+python -m backtest.cli \
+  --data examples/quickstart.csv \
+  --config examples/config/minimal.yaml \
+  --cp_tol 10 \
+  --alpha 0.1 | python -m json.tool
 ```
 
-## Data
+### 3) Run the service and hit it once
 
-Minimum columns:
+```bash
+uvicorn service.app:app --reload --port 8000 &
+PID=$!; sleep 1
 
-* `timestamp`: ISO 8601 or epoch string in UTC.
-* `x`: target value (float).
+# health
+curl -s http://localhost:8000/healthz | python -m json.tool
 
-Optional covariates:
+# one prediction
+python - <<'PY' > /tmp/predict.json
+import json
+print(json.dumps({
+  "timestamp":"2024-01-02T10:00:00Z",
+  "x":0.001,
+  "covariates":{"rv":0.02,"ewm_vol":0.015,"ac1":0.1,"z":0.0}
+}))
+PY
+curl -s -X POST http://localhost:8000/predict -H 'content-type: application/json' -d @/tmp/predict.json | python -m json.tool
 
-* `rv`, `ewm_vol`, `ac1`, `z`.
+# send truth (plain number is accepted)
+echo 0.0007 | curl -s -X POST http://localhost:8000/truth -H 'content-type: application/json' --data-binary @- | python -m json.tool
 
-Optional labels:
+# metrics (Prometheus exposition)
+curl -s http://localhost:8000/metrics | head -n 20
 
-* `cp` or `is_cp`: 0/1 change point indicator on the **current** tick.
+kill $PID
+```
 
-CSV is supported out of the box. Parquet requires `pyarrow` (already a dependency).
-
-Generate a dataset:
+### Optional: use real data
 
 ```bash
 python -m data.yahoo_fetch --ticker AAPL --start 2024-01-01 --end 2024-03-01 --interval 1h --field logret --out data/aapl_1h_logret.csv
+
+python -m backtest.cli \
+  --data data/aapl_1h_logret.csv \
+  --profile market \
+  --cp_tol 10 \
+  --alpha 0.1 | python -m json.tool
 ```
 
-Simulate labeled segments:
+---
 
-```bash
-python -m data.sim_cp --n 4000 --out data/sim_cp.csv
-```
+## What this does (in plain English)
+
+For each incoming tick `(timestamp, x, covariates)`:
+
+1. **Features**: compute rolling stats and covariates (`z`, `ewm_vol`, `ac1`, `rv`) without peeking ahead.
+2. **Change points**: BOCPD updates its posterior and yields a `regime_label` plus a continuous `regime_score`.
+3. **Routing**: a dwell/penalty/threshold policy picks a model (`arima` or `xgb`), with optional freeze after CP spikes.
+4. **Forecast**: the chosen model produces `y_hat` for the next tick and updates its own state online (no leakage).
+5. **Intervals**: online conformal computes `[interval_low, interval_high]`. As truth arrives on the *next* tick, residual buffers update.
+
+Backtesting aligns **previous prediction vs current truth**, and reports MAE/RMSE/sMAPE/coverage/latency plus change-point metrics.
+
+---
+
+## Requirements
+
+* Python **3.11**
+* Linux/macOS/WSL recommended (Dockerfile included)
+
+---
+
+## Data format
+
+Required:
+
+* `timestamp` — ISO 8601 string (UTC) or epoch string
+* `x` — target float
+
+Optional covariates (used by default):
+
+* `rv`, `ewm_vol`, `ac1`, `z`
+
+Optional labels:
+
+* `cp` or `is_cp` — `0/1` CP indicator on the **current** tick
+
+CSV and Parquet supported (Parquet requires `pyarrow`, already a dependency).
+
+---
 
 ## Configuration
 
-Config loading order:
+Resolution order:
 
-1. `--config path.yaml` (explicit).
-2. `REGIME_CONFIG` env var.
-3. Profile via `--profile sim|market` or `REGIME_PROFILE`, resolved under `config/profiles/<profile>.yaml`.
-4. Fallback to `config/default.yaml`.
+1. `--config path.yaml`
+2. `REGIME_CONFIG` env var
+3. `--profile sim|market` or `REGIME_PROFILE` → `config/profiles/<profile>.yaml`
+4. Fallback `config/default.yaml`
 
-You can override conformal interval width with `--alpha` on the CLI. That sets `conformal.alpha_main` and ensures it’s included in `conformal.alphas`.
+CLI `--alpha` **overrides** `conformal.alpha_main` and ensures it’s in `conformal.alphas`.
 
-Example YAML:
+Minimal example (also in `examples/config/minimal.yaml`):
 
 ```yaml
 features:
@@ -90,97 +149,101 @@ detector:
 
 router:
   dwell_min: 10
-  switch_threshold: 0.1
-  switch_penalty: 0.05
-  freeze_on_recent_cp: true
-  freeze_ticks: 3
+  switch_threshold: 0.0
+  switch_penalty: 0.0
+  freeze_on_recent_cp: false
+  freeze_ticks: 0
 
 conformal:
   alpha_main: 0.1
-  alphas: [0.1, 0.2]
+  alphas: [0.1]
   window: 500
   decay: 1.0
   by_regime: true
   cold_scale: 0.01
 ```
 
-## Backtesting
+---
+
+## Backtesting & sweep
 
 Single run:
 
 ```bash
-python -m backtest.cli --data data/aapl_1h_logret.csv --cp_tol 10 --profile market --alpha 0.1
+python -m backtest.cli --data data/aapl_1h_logret.csv --profile market --cp_tol 10 --alpha 0.1
 ```
 
-Notes:
-
-* `--alpha` controls interval width (e.g., 0.1 ⇒ 90% PI).
-* Metrics are computed as **previous prediction vs current truth** (no look-ahead).
-* CP metrics compare predicted events from `score` against labels `cp`/`is_cp` with tolerance `--cp_tol`.
-
-Parameter sweep (fast):
+Fast sweep (dataset is read once; `--max_rows` limits workload):
 
 ```bash
 python -m backtest.sweep --data data/aapl_1h_logret.csv --cp_tol 10 --alpha 0.1 --max_rows 5000 > sweep.jsonl
 ```
 
-The sweep materializes the dataset once for speed. Use `--max_rows` to cap workload.
+---
 
-## Service
+## API (FastAPI)
 
-Run locally:
+* **Docs / UIs**: `/docs` (Swagger), `/redoc`
+* **Schema**: `/openapi.json` (also see `openapi/explicit-schemas.json` for the liberal `/truth` body)
 
-```bash
-python -m data.yahoo_fetch --ticker AAPL --start 2024-01-01 --end 2024-03-01 --interval 1h --field logret --out data/aapl_1h_logret.csv
+Endpoints:
 
-python -m backtest.cli --data data/aapl_1h_logret.csv --cp_tol 10 --profile market --alpha 0.1
+* `POST /predict`
+  Request body:
 
-uvicorn service.app:app --port 8000
+  ```json
+  {
+    "timestamp": "2024-01-02T10:00:00Z",
+    "x": 0.001,
+    "covariates": {"rv":0.02,"ewm_vol":0.015,"ac1":0.1,"z":0.0}
+  }
+  ```
 
-printf '%s' '{"timestamp":"2024-01-02T10:00:00Z","x":0.001,"covariates":{"rv":0.02,"ewm_vol":0.015,"ac1":0.1,"z":0.0}}' \
-| curl -sS -X POST http://localhost:8000/predict -H 'content-type: application/json' -d @-
-printf '0.0007' | curl -sS -X POST http://localhost:8000/truth -H 'content-type: application/json' --data-binary @-
-curl -sS http://localhost:8000/metrics | head -n 50
+  Response:
 
-```
+  ```json
+  {
+    "y_hat": 0.0009,
+    "interval_low": -0.0012,
+    "interval_high": 0.0031,
+    "intervals": {"alpha=0.10":[-0.0012,0.0031]},
+    "regime": "low_vol",
+    "score": 0.42,
+    "latency_ms": {"features_ms":3.1,"detector_ms":0.9,"router_ms":0.1,"model_ms":1.8,"conformal_ms":0.3,"total_ms":6.4},
+    "warmup": false,
+    "degraded": false
+  }
+  ```
 
-Health:
+* `POST /truth`
+  Body can be a number or object with `y`/`y_true`:
 
-```bash
-curl -s http://localhost:8000/healthz
-```
+  * `0.0007`
+  * `{"y": 0.0007}`
 
-Predict:
+* `GET /healthz` → `{"status":"ok"}`
 
-```bash
-python - <<'PY'
-import json, sys
-body = {
-  "timestamp": "2024-01-02T10:00:00Z",
-  "x": 0.001,
-  "covariates": {"rv":0.02,"ewm_vol":0.015,"ac1":0.1,"z":0.0}
-}
-print(json.dumps(body))
-PY
-```
+* `GET /version` → `{"git_sha":"<commit>" }`
 
-```bash
-curl -s -X POST http://localhost:8000/predict -H 'content-type: application/json' -d @- < body.json
-```
+* `GET /config` → current loaded config (as JSON)
 
-Truth feedback (plain number or object with `y` / `y_true`):
+* `GET /metrics` → Prometheus exposition
 
-```bash
-echo 0.0007 | curl -s -X POST http://localhost:8000/truth -H 'content-type: application/json' --data-binary @-
-```
+---
 
-Metrics (Prometheus):
+## Metrics, Grafana, Alerts
 
-```bash
-curl -s http://localhost:8000/metrics | head
-```
+Prometheus counters/histograms:
 
-> The service is stateful and single-process per worker. Multiple uvicorn workers do **not** share state.
+* `requests_total{endpoint="predict|truth|healthz|version|config"}`
+* `latency_ms_bucket{stage="features_ms|detector_ms|router_ms|model_ms|conformal_ms|service_ms"}` (+ `_sum`, `_count`)
+
+Ready-to-import:
+
+* Grafana dashboard: `grafana/dashboard.json`
+* Prometheus alert rules: `prometheus/alerts.yaml`
+
+---
 
 ## Docker
 
@@ -196,66 +259,39 @@ Run:
 docker run --rm -p 8000:8000 regime-forecast:latest
 ```
 
-Notes:
-
-* The image exposes port `8000`.
-* To mount data/config: `-v "$PWD/data":/app/data -v "$PWD/config":/app/config`.
-* Set config via env: `-e REGIME_PROFILE=market` or `-e REGIME_CONFIG=/app/config/custom.yaml`.
-
-## Architecture
-
-Per tick:
-
-1. `FeatureExtractor` updates rolling stats and builds covariates (`z`, `ewm_vol`, `ac1`, `rv`).
-2. `BOCPD` updates change-point posterior and emits a regime label + score.
-3. `Router` chooses `arima` or `xgb` using regime, score, dwell, penalties, and optional freeze on CP spikes.
-4. Model predicts `y_hat` for the next tick and updates internal state (no leakage).
-5. `OnlineConformal` updates with residuals as truth arrives and computes intervals for `alpha_main` and any extra alphas.
-
-The backtester aligns **prev\_pred vs current truth** and reports error, coverage, latency, and CP metrics.
-
-## Development
+Config/data in container:
 
 ```bash
-ruff check .
-mypy .
-pytest
+docker run --rm -p 8000:8000 \
+  -e REGIME_PROFILE=market \
+  -v "$PWD/config":/app/config \
+  -v "$PWD/data":/app/data \
+  regime-forecast:latest
 ```
 
-Git hygiene:
+---
 
-```bash
-git status
-git rev-parse --abbrev-ref HEAD
-git add -A && git commit -m "fix: concise message"
-```
+## CI
+
+GitHub Actions workflow at `.github/workflows/ci.yml`:
+
+* installs deps, runs `ruff` + `mypy` + `pytest`
+* builds Docker image
+* optional publish to GHCR when pushing to `main`
+
+---
+
+## Extending
+
+* Add a model: implement `OnlineModel.predict_update(tick, feats)` and register it in `core/pipeline.Pipeline.models`.
+* Add features: extend `FeatureExtractor`; avoid leakage; keep constant-time updates.
+* Change routing: see `core/router.Router` (dwell/threshold/penalty/freeze).
+
+---
 
 ## Known limitations
 
-* State is in-process; no cross-worker sharing.
-* If `statsmodels`/`xgboost`/`scikit-learn` aren’t available, models degrade to naive but continue serving.
-* Conformal intervals use absolute residuals; near-zero series yield volatile sMAPE.
-
-## Troubleshooting
-
-Intervals too wide/narrow:
-
-* Tune `conformal.window`, `conformal.decay`, and `--alpha`.
-
-Router flaps:
-
-* Raise `router.dwell_min`/`router.switch_penalty`/`router.switch_threshold`.
-
-CP metrics are NaN except `cp_false_alarm_rate`:
-
-* You have no positive labels in data. Precision/recall are undefined in that case.
-
-Sweep slow:
-
-* Use `--max_rows` and/or thinner grids in `backtest/sweep.py`.
-
-
-
-````
-
+* **State is in-process**. Multiple uvicorn workers do not share model/conformal state.
+* If `statsmodels` / `xgboost` / `scikit-learn` aren’t available, models degrade to naïve but continue serving.
+* Conformal uses absolute residuals; on near-zero series, sMAPE is volatile.
 
