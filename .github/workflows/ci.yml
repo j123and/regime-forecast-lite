@@ -34,6 +34,10 @@ jobs:
 
       - name: Build Docker
         run: docker build -t regime-forecast:ci .
+      
+      - name: Calibration & latency checks
+        run: scripts/ci_checks.sh
+
 
   docker-publish:
     if: github.ref == 'refs/heads/main'
