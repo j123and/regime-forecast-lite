@@ -1,3 +1,4 @@
+# core/pipeline.py
 from __future__ import annotations
 
 import time
@@ -57,44 +58,65 @@ class Pipeline:
             cold_scale=ccfg.get("cold_scale", 0.01),
         )
 
-        self._pending_truth_updates = 0
-        self._last_y_hat: float | None = None
-        self._last_regime: str | None = None
+        # --- alignment state ---
+        # forecast to be matched with the *next* truth arrival
+        self._yhat_prev: float | None = None
+        self._regime_prev: str | None = None
+        # forecast we just produced in process() for the following tick
+        self._yhat_next: float | None = None
+        self._regime_next: str | None = None
 
     def update_truth(self, y_true: float) -> None:
-        if self._last_y_hat is not None:
-            self.conf.update(self._last_y_hat, y_true, self._last_regime)
-        self._pending_truth_updates = max(0, self._pending_truth_updates - 1)
+        """
+        Called with the *current* tick's truth. Must update conformal using the
+        forecast that was produced on the previous process() call.
+        """
+        if self._yhat_prev is not None:
+            self.conf.update(self._yhat_prev, float(y_true), self._regime_prev)
+
+        # advance the pointer: the forecast we made in the last process()
+        # becomes the one to be matched on the next truth
+        self._yhat_prev = self._yhat_next
+        self._regime_prev = self._regime_next
+        # do not clear _yhat_next here; it will be overwritten on the next process()
 
     def process(self, tick: Tick) -> dict[str, float | str | dict[str, float] | bool | dict[str, tuple[float, float]]]:
         t0 = time.perf_counter()
 
+        # 1) features
         feats = self.fe.update(tick)
         t1 = time.perf_counter()
 
+        # 2) detector
         det = self.det.update(float(tick["x"]), feats)
         t2 = time.perf_counter()
 
-        # Ensure meta carries cp_prob (fallback to regime_score) so Router freeze logic works.
+        # ensure meta carries cp_prob (fallback to regime_score) so Router freeze logic works
         meta = dict(det.get("meta", {}) or {})
         meta.setdefault("cp_prob", float(det["regime_score"]))
 
+        # 3) routing
         model_name = self.router.choose(det["regime_label"], det["regime_score"], meta)
         t3 = time.perf_counter()
 
+        # 4) model predict+update (model is free to update internal state from this tick)
         y_hat, _ = self.models[model_name].predict_update(tick, feats)
         t4 = time.perf_counter()
 
+        # 5) build intervals from *current* conformal state (no new truth yet)
         vol_hint = float(feats.get("ewm_vol") or feats.get("rv") or 0.01)
-        ql, qh = self.conf.interval(y_hat, alpha=self.alpha_main, regime_label=det["regime_label"], scale_hint=vol_hint)
+        ql, qh = self.conf.interval(
+            y_hat, alpha=self.alpha_main, regime_label=det["regime_label"], scale_hint=vol_hint
+        )
         multi = self.conf.interval(
             y_hat, regime_label=det["regime_label"], scale_hint=vol_hint, alphas_multi=self.alpha_list
         )
         t5 = time.perf_counter()
 
-        self._last_y_hat = float(y_hat)
-        self._last_regime = det["regime_label"]
-        self._pending_truth_updates += 1
+        # IMPORTANT: store this forecast as the one to be matched with the *next* truth,
+        # but DO NOT use it to update conformal now. update_truth() will shift pointers.
+        self._yhat_next = float(y_hat)
+        self._regime_next = det["regime_label"]
 
         lat = {
             "features_ms": (t1 - t0) * 1000.0,

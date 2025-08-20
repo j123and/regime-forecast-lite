@@ -20,13 +20,16 @@ dependencies = [
   # core / data
   "numpy>=1.26",
   "pandas>=2.0",
-  "pyarrow>=14",         # parquet in data.replay
-  "scipy>=1.11",         # statsmodels runtime
+  "pyarrow>=14",
+  "scipy>=1.11",
 
-  # models (optional at runtime but imported; we provide them so service isn't crippled)
+  # models
   "statsmodels>=0.14",
   "scikit-learn>=1.3",
   "xgboost>=2.0",
+
+  # plotting
+  "matplotlib>=3.8",
 
   # data utilities
   "yfinance>=0.2",

@@ -28,3 +28,12 @@ xgb:
   n_estimators: 200
   max_depth: 5
   learning_rate: 0.05
+
+# config/profiles/market.yaml
+conformal:
+  alpha_main: 0.1
+  alphas: [0.1]
+  window: 200000    # bigger than your dataset
+  decay: 1.0        # no forgetting
+  by_regime: true  # one global buffer
+  cold_scale: 2.5
