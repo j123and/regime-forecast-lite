@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import time
 from threading import Lock
-from typing import Any
+from typing import Annotated, Any
 
 import structlog
 from fastapi import Body, FastAPI, HTTPException
@@ -33,7 +33,7 @@ _lock = Lock()  # stateful pipeline => guard access
 
 def _to_float(v: Any, default: float = 0.0) -> float:
     # accept ints/floats/strings that look like numbers
-    if isinstance(v, (int, float)):
+    if isinstance(v, int | float):
         return float(v)
     if isinstance(v, str):
         try:
@@ -44,7 +44,7 @@ def _to_float(v: Any, default: float = 0.0) -> float:
 
 
 def _to_pair(v: Any) -> list[float] | None:
-    if isinstance(v, (list, tuple)) and len(v) == 2:
+    if isinstance(v, list | tuple) and len(v) == 2:
         return [_to_float(v[0]), _to_float(v[1])]
     return None
 
@@ -54,7 +54,6 @@ def _observe_latencies(lat: dict[str, float]) -> None:
         try:
             LAT.labels(stage).observe(float(ms))
         except Exception:
-            # never let metrics blow up the request path
             pass
 
 
@@ -103,7 +102,7 @@ def predict(inp: PredictIn) -> PredictOut:
     lat_raw = pred.get("latency_ms", {})
     if isinstance(lat_raw, dict):
         for k, v in lat_raw.items():
-            if isinstance(v, (int, float)):
+            if isinstance(v, int | float):
                 lat[k] = float(v)
     lat["service_ms"] = (t1 - t0) * 1000.0
     _observe_latencies(lat)
@@ -133,14 +132,14 @@ def predict(inp: PredictIn) -> PredictOut:
 
 
 @app.post("/truth")
-def truth(payload: Any = Body(...)) -> dict[str, str]:
+def truth(payload: Annotated[Any, Body(...)] ) -> dict[str, str]:
     """
     Accepts either a plain JSON number (e.g., 0.0005) or an object with 'y' or 'y_true'.
     """
     REQS.labels("truth").inc()
 
     y_val: float | None = None
-    if isinstance(payload, (int, float, str)):
+    if isinstance(payload, int | float | str):
         y_val = _to_float(payload)
     elif isinstance(payload, dict):
         for k in ("y", "y_true", "value"):

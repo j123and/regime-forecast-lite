@@ -7,7 +7,7 @@ class Router:
     """
     Score-aware hard switch with:
       - dwell: minimum ticks to stay on current model
-      - switch_threshold: minimum regime_score (e.g., cp_prob) to permit switching
+      - switch_threshold: minimum regime_score to permit switching
       - switch_penalty: extra margin required only when switching away from current
       - freeze_on_recent_cp: freeze decisions for `freeze_ticks` after cp_prob spike
     """
@@ -40,9 +40,9 @@ class Router:
 
     def choose(self, regime_label: str, regime_score: float, meta: dict[str, object] | None = None) -> str:
         m = meta or {}
-        # mypy- and ruff-safe extraction
-        raw: Any = m.get("cp_prob", 0.0)
-        cp_prob = float(raw) if isinstance(raw, int | float) else 0.0
+        # Extract cp_prob robustly; fallback to regime_score if detector didn't provide it.
+        raw: Any = m.get("cp_prob", regime_score)
+        cp_prob = float(raw) if isinstance(raw, int | float) else float(regime_score)
 
         # freeze after a CP spike
         if self.freeze_on_recent_cp and cp_prob >= self.cp_spike_threshold:

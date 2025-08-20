@@ -147,12 +147,7 @@ def detection_metrics(
     min_consecutive: int = 1,
 ) -> dict[str, float]:
     """
-    Core event detection metrics. Always reports:
-      - cp_pred_count, cp_chatter_per_1000
-    If there are true events, also reports:
-      - cp_precision, cp_recall, cp_delay_mean, cp_delay_p95, cp_earliness_mean, cp_false_alarm_rate
-    If there are no true events, precision/recall/delays are NaN but false_alarm_rate
-    remains defined as (#predictions / n).
+    Core event detection metrics.
     """
     pred_idx = _pred_indices_from_scores(scores, threshold, cooldown, min_consecutive)
     pred_count = len(pred_idx)
@@ -178,6 +173,9 @@ def detection_metrics(
             }
         )
         return out
+
+    # mypy: after no_true is false, we know true_flags is not None
+    assert true_flags is not None
 
     true_idx = _indices_from_flags(true_flags)
     tp, fp, fn, delays = _match_events(true_idx, pred_idx, tol)
@@ -214,9 +212,7 @@ def detection_metrics(
 def cp_event_metrics(log: list[dict[str, Any]], tol: int, *, threshold: float = 0.5, cooldown: int = 5) -> dict[str, float]:
     """
     Thin wrapper to compute CP metrics from a backtest log.
-    Expects log entries with keys:
-      - 'cp_true'  : 0/1 event flag
-      - 'score'    : change-point score in [0,1] (or any monotone score)
+    Expects 'cp_true' and 'score' in each log row.
     """
     true_flags = [int(row.get("cp_true", 0.0)) for row in log]
     scores = [float(row.get("score", 0.0)) for row in log]
