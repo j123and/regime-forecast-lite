@@ -53,7 +53,7 @@ python scripts/plot_backtest.py --data data/aapl_1h_logret.csv --profile market 
 
 Generated plot (last 800 points):
 
-![AAPL 1h backtest](artifacts/plot_aapl.png)
+![AAPL 1h backtest](artifacts/plot_AAPL.png)
 
 ```
 
