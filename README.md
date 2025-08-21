@@ -227,7 +227,7 @@ Spell this out because every paper/tool does it differently.
 One-shot:
 
 ```bash
-regime-backtest --data data/sim.csv --alpha 0.1 --cp_tol 10
+python -m backtest.cli --data data/sim.csv --alpha 0.1 --cp_tol 10 --data data/sim.csv --alpha 0.1 --cp_tol 10
 ```
 
 Plot last window:
