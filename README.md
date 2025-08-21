@@ -256,7 +256,7 @@ python scripts/latency_bench.py --warmup 200 --samples 4000
 One-shot:
 
 ```bash
-python -m backtest.cli --data data/sim.csv --alpha 0.1 --cp_tol 10 --data data/sim.csv --alpha 0.1 --cp_tol 10
+python -m backtest.cli --data data/sim.csv --alpha 0.1 --cp_tol 10 
 ```
 
 Plot last window:
@@ -328,6 +328,7 @@ export PYTHONHASHSEED=0
 * Conformal assumes exchangeable residuals; coverage dips around CPs.
 * Yahoo data can be incomplete/throttled.
 * Service state is in-memory; restart wipes buffers unless you persist them.
+* Current BOCPD config favors precision at the cost of recall; recall can be improved by retuning but raises false alarms.
 
 ## Project structure
 
