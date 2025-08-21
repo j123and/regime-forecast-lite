@@ -7,7 +7,6 @@ class PredictIn(BaseModel):
     timestamp: str
     x: float
     covariates: dict[str, float] = Field(default_factory=dict)
-    # New: identify the stream and (optionally) the intended target timestamp.
     series_id: str = "default"
     target_timestamp: str | None = None  # if omitted, server will echo `timestamp`
 
@@ -22,18 +21,16 @@ class PredictOut(BaseModel):
     latency_ms: dict[str, float]
     warmup: bool = False
     degraded: bool = False
-    # New: keys for idempotency & OOO handling
     prediction_id: str
     series_id: str
     target_timestamp: str
 
 
 class TruthIn(BaseModel):
-    # Must provide either prediction_id OR (series_id AND target_timestamp).
+    # NOTE: The service currently requires prediction_id (idempotent).
     prediction_id: str | None = None
-    series_id: str | None = None
-    target_timestamp: str | None = None
-    # Accept any of these for the value
+    series_id: str | None = None  # reserved for future use
+    target_timestamp: str | None = None  # reserved for future use
     y: float | None = None
     y_true: float | None = None
     value: float | None = None
@@ -41,6 +38,6 @@ class TruthIn(BaseModel):
 
 class TruthOut(BaseModel):
     status: str
-    matched_by: str | None = None  # "prediction_id" | "series_ts" | None
+    matched_by: str | None = None  # "prediction_id" | None
     idempotent: bool | None = None
     queued: bool | None = None

@@ -79,7 +79,9 @@ def _indices_from_flags(flags: Sequence[int]) -> list[int]:
     return [i for i, f in enumerate(flags) if int(f) == 1]
 
 
-def _match_events(true_idx: list[int], pred_idx: list[int], tol: int) -> tuple[int, int, int, list[int]]:
+def _match_events(
+    true_idx: list[int], pred_idx: list[int], tol: int
+) -> tuple[int, int, int, list[int]]:
     """
     Greedy bipartite matching with ±tol window.
     Returns (tp, fp, fn, delays_of_tp) where delay = pred_index - true_index (can be negative).
@@ -209,7 +211,9 @@ def detection_metrics(
     return out
 
 
-def cp_event_metrics(log: list[dict[str, Any]], tol: int, *, threshold: float = 0.5, cooldown: int = 5) -> dict[str, float]:
+def cp_event_metrics(
+    log: list[dict[str, Any]], tol: int, *, threshold: float = 0.5, cooldown: int = 5
+) -> dict[str, float]:
     """
     Thin wrapper to compute CP metrics from a backtest log.
     Expects 'cp_true' and 'score' in each log row.

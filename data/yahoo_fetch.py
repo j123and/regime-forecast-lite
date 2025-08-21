@@ -41,7 +41,21 @@ def main() -> None:
     ap.add_argument(
         "--interval",
         default="1h",
-        choices=["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"],
+        choices=[
+            "1m",
+            "2m",
+            "5m",
+            "15m",
+            "30m",
+            "60m",
+            "90m",
+            "1h",
+            "1d",
+            "5d",
+            "1wk",
+            "1mo",
+            "3mo",
+        ],
     )
     ap.add_argument("--field", default="logret", choices=["close", "logret"])
     ap.add_argument("--out", default="data/yahoo.csv")

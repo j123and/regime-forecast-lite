@@ -21,7 +21,9 @@ class BacktestRunner:
         self.cp_threshold = cp_threshold
         self.cp_cooldown = cp_cooldown
 
-    def run(self, pipe, stream: Iterable[dict[str, Any]]) -> tuple[dict[str, float], list[dict[str, Any]]]:
+    def run(
+        self, pipe, stream: Iterable[dict[str, Any]]
+    ) -> tuple[dict[str, float], list[dict[str, Any]]]:
         log: list[dict[str, Any]] = []
 
         y_true_seq: list[float] = []

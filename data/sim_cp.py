@@ -37,7 +37,11 @@ def simulate(
         # new segment params
         mu += rnd.gauss(0.0, seg_mean_scale)
         if rnd.random() < p_vol_switch:
-            vol = seg_vol_high if math.isclose(vol, seg_vol_low, rel_tol=0.0, abs_tol=1e-12) else seg_vol_low
+            vol = (
+                seg_vol_high
+                if math.isclose(vol, seg_vol_low, rel_tol=0.0, abs_tol=1e-12)
+                else seg_vol_low
+            )
         # generate
         for k in range(seg_len):
             ts.append((t + timedelta(hours=1)).isoformat() + "Z")

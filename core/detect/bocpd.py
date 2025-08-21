@@ -19,7 +19,10 @@ def _student_t_logpdf(x: float, mu: float, kappa: float, alpha: float, beta: flo
         - ((nu + 1.0) / 2.0) * math.log(inv)
     )
 
-def _update_nig(mu: float, kappa: float, alpha: float, beta: float, x: float) -> tuple[float, float, float, float]:
+
+def _update_nig(
+    mu: float, kappa: float, alpha: float, beta: float, x: float
+) -> tuple[float, float, float, float]:
     """One-step posterior update for Normal-Inverse-Gamma."""
     kappa_n = kappa + 1.0
     mu_n = (kappa * mu + x) / kappa_n
@@ -27,11 +30,13 @@ def _update_nig(mu: float, kappa: float, alpha: float, beta: float, x: float) ->
     beta_n = beta + 0.5 * (kappa * (x - mu) ** 2) / kappa_n
     return mu_n, kappa_n, alpha_n, beta_n
 
+
 def _logsumexp(values: list[float]) -> float:
     m = max(values)
     if not math.isfinite(m):
         return m
     return m + math.log(sum(math.exp(v - m) for v in values))
+
 
 class BOCPD:
     """
@@ -95,7 +100,9 @@ class BOCPD:
             if r + 1 < r_cap:
                 term = log_pr[r] + log1mh + loglik[r]
                 a, b = new_logpr[r + 1], term
-                new_logpr[r + 1] = a + math.log1p(math.exp(b - a)) if a > b else b + math.log1p(math.exp(a - b))
+                new_logpr[r + 1] = (
+                    a + math.log1p(math.exp(b - a)) if a > b else b + math.log1p(math.exp(a - b))
+                )
 
         # normalize
         lz = _logsumexp(new_logpr)
@@ -134,5 +141,10 @@ class BOCPD:
         return {
             "regime_label": label,
             "regime_score": float(cp_prob),
-            "meta": {"cp_prob": float(cp_prob), "r_map": float(r_map), "r_mean": r_mean, "error": error},
+            "meta": {
+                "cp_prob": float(cp_prob),
+                "r_map": float(r_map),
+                "r_mean": r_mean,
+                "error": error,
+            },
         }
