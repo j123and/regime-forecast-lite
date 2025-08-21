@@ -220,7 +220,36 @@ python scripts/plot_baselines.py \
 * **Recall:** TP / truths (`|C|`).
 * **Tardiness:** for matched pairs, mean `(ĉ_j − c_i)` clipped below at 0; report “ticks late” on average.
 
-Spell this out because every paper/tool does it differently.
+
+## Latency methodology
+
+Measured on the server side via ASGI middleware (`time.perf_counter`) from **request receive** to **response send**. This **includes** JSON parse/validation, model state update, conformal interval compute, and JSON serialization; it **excludes** network transit.
+
+**Setup**
+- Server: `uvicorn service.app:app --host 127.0.0.1 --port 8000 --workers 1` (no `--reload`; uvloop default)
+- Concurrency: single client, sequential requests
+- Warmup: 200 requests (discarded)
+- Sample size: 4,000 measured requests
+- Timing source: `response["latency_ms"]["service_ms"]` injected by middleware (ms)
+- Determinism: pipeline is deterministic for a given config and single worker
+- Recommended to reduce BLAS noise:
+  ```bash
+  export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+  ````
+
+**Result (this setup)**
+
+* `/predict`: **p50 = 0.765 ms**, **p95 = 0.847 ms**
+
+**Reproduce**
+
+```bash
+python scripts/latency_bench.py --warmup 200 --samples 4000
+# prints: "Samples: 4000  (warmup: 200)" and p50/p95 based on service_ms
+```
+
+**Note:** Multiple workers maintain independent in-memory state and will diverge without a persistence backend; benchmarks are run with `--workers 1` by design.
+
 
 ## Backtesting
 
