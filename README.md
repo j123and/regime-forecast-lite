@@ -284,6 +284,15 @@ make docker-run-dev
 
 **Workers/state:** default to 1 worker. With >1, each worker holds its own buffers; predictions diverge.
 
+## Reproducibility
+
+The pipeline is deterministic: given the same config, single worker, and same libs,
+you get identical predictions/metrics across runs. No RNG is used in the pipeline.
+
+To avoid BLAS-induced nondeterminism on some setups, run single-threaded:
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+export PYTHONHASHSEED=0
+
 ## Limitations
 
 * EWMA lags abrupt shifts (by design).
