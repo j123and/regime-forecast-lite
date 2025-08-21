@@ -159,30 +159,45 @@ Field notes:
 * `degraded`: using fallback behavior (e.g., empty buffers or missing covariates).
 * `score`: detector’s regime score for the returned state (0–1).
 
-## Baselines (why your EWMA matters)
+## Baselines (EWMA vs RW vs AR(1))
 
-You should **not** trust a single model in isolation. Compare to trivial alternatives on the same window:
+You shouldn’t trust a single model in isolation. Compare EWMA against trivial alternatives on the **same window/mask**:
 
-* **RW (naive):** `ŷ_t = x_{t-1}`
-* **AR(1):** fit online or rolling; `ŷ_t = ϕ x_{t-1}` (OLS per window)
-* **EWMA (yours):** `ŷ_t = α x_{t-1} + (1-α) ŷ_{t-1}` with online update
+* **RW (naive):** `ŷ_t = x_{t-1}`
+* **AR(1) online:** recursive OLS/forgetting, `ŷ_t = φ_{t-1} x_{t-1}`
+* **EWMA (this project):** pipeline’s online EMA forecast
 
-If you’ve added a baseline runner, expose a flag; example:
+**Command used for the plot and metrics (AAPL, 1h; last 800 points; α=0.1):**
 
 ```bash
-regime-backtest --data data/aapl_1h_logret.csv --alpha 0.1 --cp_tol 10 --baselines rw,ar1,ewma --last 800 --out artifacts/plot_aapl_baselines.png
+python scripts/plot_baselines.py \
+  --data data/aapl_1h_logret.csv \
+  --profile market \
+  --alpha 0.1 \
+  --cp_tol 10 \
+  --last 800 \
+  --out artifacts/plot_aapl_baselines.png
 ```
 
-If you haven’t wired baselines yet, note it in the README and add a small script under `scripts/plot_baselines.py` that computes RW and AR(1) beside your EWMA using the same backtest harness.
+**Plot (last 800 points):**
 
-What to report (same window, same mask):
+![AAPL 1h baselines](artifacts/plot_aapl_baselines.png)
 
-* **Point error:** MAE, RMSE
-* **Interval quality:** empirical coverage vs target α, mean interval width
-* **Change-point:** precision/recall/tardiness @ `cp_tol`
-* **Latency:** p50/p95 end-to-end (see definitions below)
+**Metrics from the run above:**
 
-A one-paragraph interpretation beats a pretty chart. Example: “EWMA matches RW MAE on AAPL-1h but gives tighter intervals at equal coverage; AR(1) slightly beats MAE but under-covers after regime shifts; BOCPD finds most breaks but is \~2 ticks late on average.”
+```json
+{
+  "out": "artifacts/plot_aapl_baselines.png",
+  "n_points_plotted": 800,
+  "metrics": {
+    "ewma": { "mae": 0.0086602500725113, "rmse": 0.010903265183817849, "coverage": 0.9375, "mean_width": 0.04734823904420351 },
+    "rw":   { "mae": 0.011150869505359878, "rmse": 0.014050799942566049, "coverage": 0.8923654568210263, "mean_width": 0.04550806686136935 },
+    "ar1":  { "mae": 0.009391868130377571, "rmse": 0.011864766799166357, "coverage": 0.8973717146433041, "mean_width": 0.038606637435060626 }
+  }
+}
+```
+
+**Takeaway:** On AAPL-1h (last 800), **EWMA** has the best MAE/RMSE and achieves higher empirical coverage than RW and AR(1), **at the cost of wider intervals**. **AR(1)** produces tighter intervals but **under-covers**, especially after regime changes. **RW** is worst on point error and also under-covers.
 
 ## Metrics & definitions (be explicit)
 
