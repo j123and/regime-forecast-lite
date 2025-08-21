@@ -8,6 +8,7 @@ from .types import Features, Tick
 _EPS = 1e-12
 _RESERVED = {"z", "ewm_vol", "ac1", "rv"}
 
+
 class FeatureExtractor:
     """
     Streaming features (no leakage):
@@ -17,6 +18,7 @@ class FeatureExtractor:
       - lag-1 autocorrelation (window=win)
       - realized volatility: sqrt(mean of squared diffs over rv_win)
     """
+
     def __init__(self, win: int = 50, rv_win: int = 50, ewm_alpha: float = 0.1) -> None:
         self.win = int(win)
         self.rv_win = int(rv_win)
@@ -94,7 +96,12 @@ class FeatureExtractor:
         ewm_vol = self._update_ewm_vol(x)
         ac1 = self._ac1()
 
-        feats: Features = {"z": float(z), "ewm_vol": float(ewm_vol), "ac1": float(ac1), "rv": float(rv)}
+        feats: Features = {
+            "z": float(z),
+            "ewm_vol": float(ewm_vol),
+            "ac1": float(ac1),
+            "rv": float(rv),
+        }
 
         # merge covariates without clobbering reserved names
         cov = tick.get("covariates", {}) or {}

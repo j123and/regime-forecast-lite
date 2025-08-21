@@ -24,7 +24,9 @@ def _resolve_data_path(p: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", required=True)
-    ap.add_argument("--alpha", type=float, default=0.1, help="Interval alpha (e.g., 0.1 for 90% PI)")
+    ap.add_argument(
+        "--alpha", type=float, default=0.1, help="Interval alpha (e.g., 0.1 for 90% PI)"
+    )
     ap.add_argument("--cp_tol", type=int, default=10)
     ap.add_argument(
         "--profile",

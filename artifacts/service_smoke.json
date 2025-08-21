@@ -1,0 +1,29 @@
+{
+  "predict": {
+    "y_hat": 0.0,
+    "interval_low": -0.01,
+    "interval_high": 0.01,
+    "intervals": {
+      "alpha=0.10": [
+        -0.01,
+        0.01
+      ]
+    },
+    "regime": "low_vol",
+    "score": 0.004000000000000002,
+    "latency_ms": {
+      "service_ms": 0.1368000012007542
+    },
+    "warmup": true,
+    "degraded": false,
+    "prediction_id": "23a2acff-d499-4acd-918b-b46480a35de4",
+    "series_id": "demo",
+    "target_timestamp": "2025-08-21T16:25:17+00:00"
+  },
+  "truth": {
+    "status": "ok",
+    "matched_by": "prediction_id",
+    "idempotent": false,
+    "queued": null
+  }
+}

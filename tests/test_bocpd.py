@@ -7,14 +7,17 @@ from core.features import FeatureExtractor
 def test_bocpd_detects_mean_shift_with_small_delay():
     fe = FeatureExtractor(win=20, rv_win=20, ewm_alpha=0.2)
     det = BOCPD(
-        threshold=0.2,   # cooldown only
-        hazard=1/50,     # modest hazard; baseline cp ~ 0.02
+        threshold=0.2,  # cooldown only
+        hazard=1 / 50,  # modest hazard; baseline cp ~ 0.02
         rmax=200,
-        mu0=0.0, kappa0=1.0, alpha0=1.0, beta0=0.1,
+        mu0=0.0,
+        kappa0=1.0,
+        alpha0=1.0,
+        beta0=0.1,
         vol_threshold=1e9,
     )
 
-    xs = [0.0]*80 + [0.5]*40
+    xs = [0.0] * 80 + [0.5] * 40
     t0 = 80
     cp = []
     for t, x in enumerate(xs):
@@ -27,7 +30,7 @@ def test_bocpd_detects_mean_shift_with_small_delay():
     # Adaptive threshold: pre-shift max plus a margin tied to variance
     pre_max = max(pre)
     pre_sig = pstdev(pre) if len(pre) > 1 else 0.0
-    margin = max(2.5 * pre_sig, 0.015)   # ~noise band; floor guards tiny-variance cases
+    margin = max(2.5 * pre_sig, 0.015)  # ~noise band; floor guards tiny-variance cases
     thr = pre_max + margin
 
     alarm = None

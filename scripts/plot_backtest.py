@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -51,13 +50,21 @@ def _contiguous_ranges(mask: pd.Series) -> list[tuple[pd.Timestamp, pd.Timestamp
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Plot backtest: y vs y_hat with intervals and regimes.")
-    ap.add_argument("--data", required=True, help="CSV/Parquet with timestamp,x[,cp|is_cp, covariates...]")
+    ap = argparse.ArgumentParser(
+        description="Plot backtest: y vs y_hat with intervals and regimes."
+    )
+    ap.add_argument(
+        "--data", required=True, help="CSV/Parquet with timestamp,x[,cp|is_cp, covariates...]"
+    )
     ap.add_argument("--profile", choices=["sim", "market"], default=None)
-    ap.add_argument("--config", default=None, help="Path to YAML config (overrides default/profile)")
+    ap.add_argument(
+        "--config", default=None, help="Path to YAML config (overrides default/profile)"
+    )
     ap.add_argument("--alpha", type=float, default=0.1, help="Interval alpha (e.g., 0.1 => 90% PI)")
     ap.add_argument("--cp_tol", type=int, default=10, help="CP matching tolerance (ticks)")
-    ap.add_argument("--last", type=int, default=800, help="Only plot the last N points (for readability)")
+    ap.add_argument(
+        "--last", type=int, default=800, help="Only plot the last N points (for readability)"
+    )
     ap.add_argument("--out", default="backtest_plot.png", help="Output image path (PNG)")
     args = ap.parse_args()
 
@@ -81,7 +88,9 @@ def main() -> None:
     ax.fill_between(df.index, df["ql"], df["qh"], alpha=0.2, label=f"PI (alpha={args.alpha:g})")
 
     # Change-point marks (vertical ticks on cp_true==1)
-    cp_mask = (df.get("cp_true") == 1) if "cp_true" in df.columns else pd.Series(False, index=df.index)
+    cp_mask = (
+        (df.get("cp_true") == 1) if "cp_true" in df.columns else pd.Series(False, index=df.index)
+    )
     if cp_mask.any():
         cp_idx = df.index[cp_mask]
         ymin, ymax = df["y"].min(), df["y"].max()
@@ -108,7 +117,11 @@ def main() -> None:
 
     fig.tight_layout()
     fig.savefig(args.out, dpi=150)
-    print(json.dumps({"out": args.out, "n_points_plotted": int(len(df)), "metrics": metrics}, indent=2))
+    print(
+        json.dumps(
+            {"out": args.out, "n_points_plotted": int(len(df)), "metrics": metrics}, indent=2
+        )
+    )
 
 
 if __name__ == "__main__":

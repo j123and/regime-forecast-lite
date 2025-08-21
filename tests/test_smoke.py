@@ -11,6 +11,7 @@ def test_healthz():
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
 
+
 def test_predict():
     c = TestClient(app)
     payload = {

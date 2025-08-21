@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "regime-forecast"
+name = "regime-forecast-lite"
 version = "0.1.0"
-description = "Online regime detection + adaptive forecasting with calibrated prediction intervals (streaming, FastAPI service)."
+description = "Streaming one-step-ahead forecaster with a single model and leakage-safe pipeline (FastAPI service)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -14,50 +14,51 @@ authors = [
   { name = "Your Name" }
 ]
 
-keywords = ["time-series", "forecasting", "change-point", "BOCPD", "conformal", "online-learning", "fastapi"]
+keywords = ["time-series", "forecasting", "change-point", "conformal", "online-learning", "fastapi"]
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
   "Framework :: FastAPI",
   "Topic :: Scientific/Engineering :: Information Analysis",
   "Topic :: Internet :: WWW/HTTP :: HTTP Servers"
 ]
 
-# Keep runtime ranges sane. We pin *exact* versions via constraints.txt (see below).
 dependencies = [
-  "fastapi>=0.110,<1.0",
-  "uvicorn>=0.23,<1.0",
-  "structlog>=24,<25",
-  "prometheus-client>=0.20,<1.0",
-  "pydantic>=2.5,<3.0",
+  "fastapi>=0.111,<1.0",
+  "uvicorn>=0.30,<1.0",          # no [standard] → no uvloop/httptools
+  "pydantic>=2.7,<3.0",
   "numpy>=1.26,<3.0",
-  "pandas>=2,<3",
-  "statsmodels>=0.14,<1",
-  "scikit-learn>=1.4,<2",
-  "xgboost>=2,<3",
-  "pyarrow>=14,<20",
-  "PyYAML>=6,<7"
+  "pandas>=2.2,<3.0",
+  "scikit-learn>=1.5,<2.0",
+  "prometheus-client>=0.20,<1.0",# keep tiny metrics
+  "PyYAML>=6,<7"                 # only if you truly read a tiny YAML config; otherwise drop it later
 ]
 
 [project.optional-dependencies]
-# Developer tooling
-dev = [
-  "ruff>=0.5",
-  "mypy>=1.8",
-  "pytest>=8",
-  "pytest-cov>=4",
-  "types-PyYAML",
-]
-# Service runtime niceties; uvicorn[standard] bundles uvloop+httptools
 service = [
-  "uvicorn[standard]>=0.23,<1.0"
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.23",
+  "prometheus-client>=0.17",
+  "httpx>=0.24",
+]
+plot = ["matplotlib>=3.8"]
+market = ["yfinance>=0.2.40"]
+
+dev = [
+  "pytest",
+  "ruff",
+  "mypy",
+  "tqdm",
+  "pandas",
+  "pyarrow",
+  # pull in app and plotting extras during dev installs
+  "regime-forecast-lite[service,plot,market]",
 ]
 
+
 [project.urls]
-Homepage = "https://github.com/yourorg/regime-forecast"
-Repository = "https://github.com/yourorg/regime-forecast"
-Issues = "https://github.com/yourorg/regime-forecast/issues"
+Homepage = "https://github.com/yourorg/regime-forecast-lite"
+Repository = "https://github.com/yourorg/regime-forecast-lite"
 
 [tool.setuptools]
 include-package-data = true
@@ -67,10 +68,4 @@ where = ["."]
 exclude = ["tests*", "scripts*", "examples*", "artifacts*"]
 
 [tool.setuptools.package-data]
-# ship JSON/YAML example/configs if you have them in-tree
 "*" = ["*.json", "*.yaml", "*.yml"]
-
-# Optional: console scripts if your modules expose a main()
-[project.scripts]
-regime-backtest = "backtest.cli:main"
-regime-sweep    = "backtest.sweep:main"

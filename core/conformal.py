@@ -1,6 +1,8 @@
 # core/conformal.py
 from __future__ import annotations
+
 from collections import deque
+
 
 def _unweighted_quantile(vals: list[float], q: float) -> float:
     # linear interpolation between order stats
@@ -18,10 +20,12 @@ def _unweighted_quantile(vals: list[float], q: float) -> float:
     frac = pos - lo
     return float(s[lo] * (1.0 - frac) + s[hi] * frac)
 
+
 def _effective_n(wts: list[float]) -> float:
     s = sum(wts)
     s2 = sum(w * w for w in wts)
     return (s * s / s2) if s2 > 0.0 else 0.0
+
 
 def _weighted_quantile(vals: list[float], wts: list[float], q: float) -> float:
     # vals already absolute residuals; wts >= 0
@@ -40,6 +44,7 @@ def _weighted_quantile(vals: list[float], wts: list[float], q: float) -> float:
             return float(v)
     return float(pairs[-1][0])
 
+
 class OnlineConformal:
     """
     Absolute-residual conformal with:
@@ -47,7 +52,14 @@ class OnlineConformal:
       - optional per-regime buffers
       - multi-alpha interval computation
     """
-    def __init__(self, window: int = 500, decay: float = 1.0, by_regime: bool = False, cold_scale: float = 0.01) -> None:
+
+    def __init__(
+        self,
+        window: int = 500,
+        decay: float = 1.0,
+        by_regime: bool = False,
+        cold_scale: float = 0.01,
+    ) -> None:
         self.window = int(window)
         self.decay = float(decay)
         self.by_regime = bool(by_regime)
@@ -92,27 +104,6 @@ class OnlineConformal:
         scale_hint: float | None = None,
         alphas_multi: list[float] | None = None,
     ):
-        # tiny helpers local to this method to avoid import churn
-        def _eff_n(wts: list[float]) -> float:
-            s = sum(wts)
-            s2 = sum(w * w for w in wts)
-            return (s * s / s2) if s2 > 0.0 else 0.0
-
-        def _unweighted_q(vals: list[float], q: float) -> float:
-            n = len(vals)
-            if n == 0:
-                return 0.0
-            if q <= 0.0:
-                return float(min(vals))
-            if q >= 1.0:
-                return float(max(vals))
-            s = sorted(vals)
-            pos = q * (n - 1)
-            lo = int(pos)
-            hi = lo + 1 if lo + 1 < n else lo
-            frac = pos - lo
-            return float(s[lo] * (1.0 - frac) + s[hi] * frac)
-
         def _q_for(buf_res: deque[float], buf_wt: deque[float], a: float) -> float:
             # empty buffer → cold scale or provided hint
             if not buf_res:
@@ -120,23 +111,20 @@ class OnlineConformal:
                 return float(base)
 
             # guard: if effective N is small, use a safer unweighted 1−α quantile
-            eff = _eff_n(list(buf_wt)) if buf_wt else 0.0
+            eff = _effective_n(list(buf_wt)) if buf_wt else 0.0
             if eff < 30.0:
-                q_unw = _unweighted_q(list(buf_res), 1.0 - a)
+                q_unw = _unweighted_quantile(list(buf_res), 1.0 - a)
                 base = scale_hint if scale_hint is not None else self.cold_scale
                 return float(max(q_unw, float(base)))
 
             # main: weighted 1−α quantile from the active buffer
             q_reg = _weighted_quantile(list(buf_res), list(buf_wt), 1.0 - a)
 
-            q_reg = _weighted_quantile(list(buf_res), list(buf_wt), 1.0 - a)
-
             # HARD GLOBAL FLOOR: never smaller than the global 1−α scale
             if self.res_global:
-                q_glb = _unweighted_q(list(self.res_global), 1.0 - a)
+                q_glb = _unweighted_quantile(list(self.res_global), 1.0 - a)
                 q_reg = max(q_reg, q_glb)
             return float(q_reg)
-
 
         res_q, wts_q = self._buffers_for(regime_label)
 
