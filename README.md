@@ -50,16 +50,6 @@ Artifacts:
 * Backtest plot: `artifacts/plot_sim.png` (last 800 points)
 * Synthetic data: `data/sim.csv`
 
-### Example metrics (synthetic; EWMA + BOCPD; α=0.10)
-
-```
-MAE=0.021  RMSE=0.031  Coverage=0.91
-Latency: p50≈1.2 ms, p95≈1.4 ms  (single-process, on x86_64; pure CPU; includes JSON encode/decode)
-CP: precision=1.00, recall≈0.04, tardy≈2 ticks (avg)
-```
-
-Numbers vary run-to-run. Hardware and window sizes matter—see “Metrics & definitions”.
-
 ## Real-market example (AAPL, 1h)
 
 ```bash
