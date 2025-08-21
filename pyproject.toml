@@ -5,60 +5,71 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "regime-forecast-lite"
 version = "0.1.0"
-description = "Streaming one-step-ahead forecaster with a single model and leakage-safe pipeline (FastAPI service)."
+description = "Streaming one-step-ahead forecaster with a leakage-safe pipeline and optional FastAPI service."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 
 authors = [
-  { name = "Your Name" }
+  { name = "j123and" }
 ]
 
 keywords = ["time-series", "forecasting", "change-point", "conformal", "online-learning", "fastapi"]
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
   "Framework :: FastAPI",
   "Topic :: Scientific/Engineering :: Information Analysis",
   "Topic :: Internet :: WWW/HTTP :: HTTP Servers"
 ]
 
+# ——— Core kept thin: safe for library users ———
 dependencies = [
-  "fastapi>=0.111,<1.0",
-  "uvicorn>=0.30,<1.0",          # no [standard] → no uvloop/httptools
-  "pydantic>=2.7,<3.0",
   "numpy>=1.26,<3.0",
-  "pandas>=2.2,<3.0",
-  "scikit-learn>=1.5,<2.0",
-  "prometheus-client>=0.20,<1.0",# keep tiny metrics
-  "PyYAML>=6,<7"                 # only if you truly read a tiny YAML config; otherwise drop it later
+  "PyYAML>=6,<7",
 ]
 
 [project.optional-dependencies]
+# FastAPI service + metrics + client for tests
 service = [
-  "fastapi>=0.110",
-  "uvicorn[standard]>=0.23",
-  "prometheus-client>=0.17",
-  "httpx>=0.24",
+  "fastapi>=0.110,<1.0",
+  "uvicorn>=0.30,<1.0",
+  "prometheus-client>=0.20,<1.0",
+  "httpx>=0.24,<1.0",
 ]
-plot = ["matplotlib>=3.8"]
-market = ["yfinance>=0.2.40"]
 
+# Plotting (only needed for plots)
+plot = ["matplotlib>=3.8,<4.0"]
+
+# Market data fetcher
+market = ["yfinance>=0.2.40,<0.3"]
+
+# Backtest convenience (CSV works without these; Parquet needs these)
+backtest = [
+  "pandas>=2.2,<3.0",
+  "pyarrow>=14,<19",
+]
+
+# Dev tools ONLY (no self-references here)
 dev = [
-  "pytest",
-  "ruff",
-  "mypy",
-  "tqdm",
-  "pandas",
-  "pyarrow",
-  # pull in app and plotting extras during dev installs
-  "regime-forecast-lite[service,plot,market]",
+  "pytest>=8,<9",
+  "ruff>=0.5,<1.0",
+  "mypy>=1.10,<2.0",
+  "tqdm>=4.66,<5.0",
+  "types-PyYAML>=6.0.12,<7.0",
+  "pre-commit>=3.7,<4.0"
 ]
-
 
 [project.urls]
-Homepage = "https://github.com/yourorg/regime-forecast-lite"
-Repository = "https://github.com/yourorg/regime-forecast-lite"
+Homepage = "https://github.com/j123and/regime-forecast-lite"
+Repository = "https://github.com/j123and/regime-forecast-lite"
+
+# CLI entry points (so users don’t need `python -m`)
+[project.scripts]
+regime-backtest = "backtest.cli:main"
+regime-sim = "data.sim_cp:main"
+regime-fetch-yahoo = "data.yahoo_fetch:main"
 
 [tool.setuptools]
 include-package-data = true
