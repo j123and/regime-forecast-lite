@@ -1,14 +1,11 @@
 
 # Regime Forecast Lite
 
-Minimal, portfolio-ready streaming forecasting + change-point aware uncertainty.
 - **Model:** online EWMA next-tick forecast  
 - **Detector:** BOCPD (Student-t emissions) with cooldown/hysteresis  
 - **Uncertainty:** online conformal (sliding window, optional decay, per-regime buffers)  
 - **Service:** FastAPI with `/predict` → `/truth` flow + Prometheus metrics  
 - **Backtesting:** CLI runner with coverage/latency/CP metrics and plotting
-
-> **Intentionally simple:** no ARIMA/XGBoost, no snapshot/restore, single-process state.
 
 ---
 
@@ -193,21 +190,6 @@ pytest -q
 # CI-ish local gate
 ./scripts/ci_checks.sh
 ```
-
----
-
-## What this project demonstrates
-
-* Clean online pipeline: features → detector → forecast → conformal intervals
-* Proper no-leakage sequencing and /predict→/truth semantics
-* Simple, test-covered FastAPI service with metrics
-* Clear code style (ruff + mypy), realistic CLI backtesting, plots, and sweeps
-
-**Non-goals (on purpose):**
-
-* No heavy models (ARIMA/XGBoost/etc.)
-* No snapshot/restore endpoints or multi-process orchestration
-* No DBs or brokers—kept minimal for clarity
 
 ---
 
