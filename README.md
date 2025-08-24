@@ -10,7 +10,7 @@ Minimal streaming forecaster with a leakage-safe pipeline and an optional FastAP
 * **Backtesting:** CLI with coverage/latency/CP metrics + plots
 
 ## Why this exists
-+Small, leak-safe, and testable online baseline: shows a clean `/predict → /truth` loop, idempotency, and simple uncertainty without pretending to be a SOTA time-series model.
+Small, leak-safe, and testable online baseline: shows a clean `/predict → /truth` loop, idempotency, and simple uncertainty without pretending to be a SOTA time-series model.
 
 ## 60-second demo
 
@@ -145,8 +145,8 @@ All optional. Defaults are sensible for local/dev.
 
 * `SERVICE_API_KEY` — if set, `/predict` and `/truth` require header `x-api-key: <key>`.
 * `RATE_LIMIT_PER_MINUTE` — per-key windowed counter; set `>0` to enable.
-* * Best-effort on clean shutdown. On crash you may lose recent state; use periodic external snapshots if you care about durability.
-
+* `SNAPSHOT_PATH` — JSON snapshot path for in-memory state on shutdown/start.
+* Best-effort on clean shutdown. On crash you may lose recent state; use periodic external snapshots if you care about durability.
 * `PENDING_CAP` — max pending predictions indexed for `/truth` matching.
 * `max_series` — LRU cap for series pipelines in memory.
 * `truth_ttl_sec`, `truth_max_ids` — idempotency cache tuning.
