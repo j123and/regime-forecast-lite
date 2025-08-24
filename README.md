@@ -167,7 +167,38 @@ docker run --rm -p 8000:8000 \
   -v "$PWD/state":/data \
   rfl:latest
 ```
+---
 
+### Results (reproducible)
+
+**Synthetic (`data/sim.csv`, α=0.10, `cp-threshold=0.6`, `cp-cooldown=5`)**
+
+```
+MAE=0.0208  RMSE=0.0298  Coverage=0.9116
+Latency (backtest): p50=0.0 ms, p95=0.0 ms
+CP: precision=0.04, recall=1.00, earliness≈7.88 ticks, chatter≈200/1000
+N=2999
+```
+
+**AAPL 1h (start=2024-08-01, α=0.10)**
+
+```
+MAE=0.004424  RMSE=0.007464  Coverage=0.9042
+Latency (backtest): p50=0.0 ms, p95=0.0 ms
+CP: (no ground-truth labels → N/A)
+N=1848
+```
+
+**Service latency (HTTP, single worker, local)**
+
+```
+Latency service_ms: p50=0.99 ms, p95=1.45 ms, N=1000
+Machine: Intel i5-10400F (OC ~4 GHz), local loopback
+```
+
+Notes: Backtest latencies exclude HTTP; the service benchmark measures JSON encode/decode + request handling over loopback. CP metrics on market data are N/A (no labels). On synthetic, low CP precision indicates detector chatter; tune threshold/cooldown if you care about precision.
+
+---
 ## Backtesting
 
 From CSV with `timestamp,x` (and optional `rv`):
@@ -178,6 +209,29 @@ python -m backtest.cli --data data/sim.csv --alpha 0.1
 
 Artifacts (JSON metrics, plots) land in `./artifacts`. There’s also `scripts/readme_run.sh` that generates a synthetic dataset, runs a backtest, optionally fetches AAPL (if you install the `market` extra), and drops paste-ready snippets in `artifacts/readme_metrics.md`.
 
+### Baselines (point-error only, same windows)
+
+**Synthetic (`data/sim.csv`)**
+
+```
+RW:   MAE=0.028626  RMSE=0.041461  (N=2999)
+AR1:  MAE=0.026319  RMSE=0.036839  (N=2989)
+EWMA: MAE=0.021329  RMSE=0.030602  (alpha=0.2, N=2999)
+```
+
+Takeaway: EWMA beats RW by \~25–26% on MAE/RMSE and beats AR(1) by \~17–19% on this stream (expected, given how the synthetic is generated).
+
+**AAPL 1h (start=2024-08-01)**
+
+```
+RW:   MAE=0.006386  RMSE=0.010225  (N=1848)
+AR1:  MAE=0.004242  RMSE=0.007507  (N=1838)
+EWMA: MAE=0.004630  RMSE=0.007671  (alpha=0.2, N=1848)
+```
+
+Takeaway: EWMA improves on RW (\~27% MAE, \~25% RMSE), but AR(1) is slightly better than EWMA on AAPL (\~9% lower MAE, \~2% lower RMSE). Interval calibration remains solid (coverage ≈0.904 @ α=0.10).
+
+---
 ## Notes on design
 
 * **Per-series sharding**: a lightweight lock per `series_id` prevents pointless global serialization.
