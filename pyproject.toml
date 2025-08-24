@@ -33,8 +33,9 @@ dependencies = [
 [project.optional-dependencies]
 # FastAPI service + metrics + client for tests
 service = [
-  "fastapi>=0.110,<1.0",
-  "uvicorn>=0.30,<1.0",
+  "fastapi>=0.110,<0.120",        # narrow to a minor series
+  "pydantic>=2.6,<3",             # explicit pin to match FastAPI v2
+  "uvicorn[standard]>=0.30,<1.0", # better defaults
   "prometheus-client>=0.20,<1.0",
   "httpx>=0.24,<1.0",
 ]
@@ -68,8 +69,8 @@ Repository = "https://github.com/j123and/regime-forecast-lite"
 # CLI entry points (so users don’t need `python -m`)
 [project.scripts]
 regime-backtest = "backtest.cli:main"
-regime-sim = "data.sim_cp:main"
-regime-fetch-yahoo = "data.yahoo_fetch:main"
+regime-sim = "data.sim_cp:main"           # REMOVE if that module isn't shipping
+regime-fetch-yahoo = "data.yahoo_fetch:main"  # REMOVE if that module isn't shipping
 
 [tool.setuptools]
 include-package-data = true

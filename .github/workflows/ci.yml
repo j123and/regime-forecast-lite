@@ -21,7 +21,8 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,backtest,service]"
+
 
       - name: Ruff
         run: ruff check .

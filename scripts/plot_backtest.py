@@ -66,6 +66,7 @@ def main() -> None:
         "--last", type=int, default=800, help="Only plot the last N points (for readability)"
     )
     ap.add_argument("--out", default="backtest_plot.png", help="Output image path (PNG)")
+    ap.add_argument("--seed", type=int, default=None, help="Optional seed label to include")
     args = ap.parse_args()
 
     metrics, df = _run_backtest(args.data, args.profile, args.config, args.alpha, args.cp_tol)
@@ -94,7 +95,6 @@ def main() -> None:
     if cp_mask.any():
         cp_idx = df.index[cp_mask]
         ymin, ymax = df["y"].min(), df["y"].max()
-        # short vlines for each CP
         for x in cp_idx:
             ax.vlines(x, ymin=ymin, ymax=ymin + 0.05 * (ymax - ymin), linewidth=1)
 
@@ -104,11 +104,12 @@ def main() -> None:
         for start, end in _contiguous_ranges(high_mask):
             ax.axvspan(start, end, alpha=0.08, label=None)
 
-    # Cosmetics
+    # Title + seed tag
+    seed_tag = f"  seed={args.seed}" if args.seed is not None else ""
     ax.set_title(
         f"Backtest — last {len(df)} points | MAE={metrics.get('mae'):.4g}  "
         f"RMSE={metrics.get('rmse'):.4g}  Coverage={metrics.get('coverage', 0.0):.3f}  "
-        f"p50={metrics.get('latency_p50_ms', 0.0):.1f}ms  p95={metrics.get('latency_p95_ms', 0.0):.1f}ms"
+        f"p50={metrics.get('latency_p50_ms', 0.0):.1f}ms  p95={metrics.get('latency_p95_ms', 0.0):.1f}ms{seed_tag}"
     )
     ax.set_xlabel("time")
     ax.set_ylabel("x")
@@ -119,7 +120,13 @@ def main() -> None:
     fig.savefig(args.out, dpi=150)
     print(
         json.dumps(
-            {"out": args.out, "n_points_plotted": int(len(df)), "metrics": metrics}, indent=2
+            {
+                "out": args.out,
+                "n_points_plotted": int(len(df)),
+                "seed": args.seed,
+                "metrics": metrics,
+            },
+            indent=2,
         )
     )
 

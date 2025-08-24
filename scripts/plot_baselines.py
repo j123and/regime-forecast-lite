@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 
 from backtest.runner import BacktestRunner
-from core.conformal import OnlineConformal
 from core.config import load_config
+from core.conformal import OnlineConformal
 from core.pipeline import Pipeline
 from data.replay import Replay
 

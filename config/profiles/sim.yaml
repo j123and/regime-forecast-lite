@@ -1,0 +1,14 @@
+detector:
+  threshold: 0.045
+  hazard: 0.0125
+  cooldown: 7
+  mu0: 0.0
+  kappa0: 1.0
+  alpha0: 4.0
+  beta0: 0.0008
+  vol_threshold: 0.02
+router:
+  freeze_on_recent_cp: true
+  freeze_ticks: 5
+  switch_threshold: 0.1
+  switch_penalty: 0.05

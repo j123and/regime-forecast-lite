@@ -20,6 +20,7 @@ artifacts/bench/**
 artifacts/calib/**
 !artifacts/calib/summary.jsonl
 !artifacts/calib/*calibration.json
+artifacts/
 
 # plots are large; commit selectively if needed
 *.png

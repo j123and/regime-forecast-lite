@@ -6,6 +6,77 @@ from typing import Any
 from .metrics import coverage, latency_p50_p95, mae, rmse, smape
 
 
+def _ingest_truth(pipe, y: float, prediction_id: str | None = None):
+    # Preferred: update_truth(y[, prediction_id])
+    if hasattr(pipe, "update_truth"):
+        try:
+            return pipe.update_truth(y=y, prediction_id=prediction_id)
+        except TypeError:
+            return pipe.update_truth(y)
+    # Fallbacks: update(y) / learn_one(y) / observe_truth(y) / on_truth(y)
+    for name in ("update", "learn_one", "observe_truth", "on_truth"):
+        if hasattr(pipe, name):
+            return getattr(pipe, name)(y)
+    # No explicit truth method → assume pipeline self-updates in process()
+    return None
+
+
+def _predict(pipe, tick: dict[str, Any]) -> dict[str, Any]:
+    """Call the pipeline's predict/step/process function."""
+    for name in ("process", "predict", "step", "process_tick", "__call__"):
+        if hasattr(pipe, name):
+            fn = getattr(pipe, name)
+            return fn(tick)
+    raise AttributeError(
+        "Pipeline has no predict method; expected one of: "
+        "process/predict/step/process_tick/__call__"
+    )
+
+
+def _extract_latency_ms(pred: dict[str, Any]) -> float:
+    lm = pred.get("latency_ms") or {}
+    # Prefer total_ms if present; else service_ms; else 0.0
+    if isinstance(lm, dict):
+        if "total_ms" in lm:
+            return float(lm["total_ms"])
+        if "service_ms" in lm:
+            return float(lm["service_ms"])
+    # Some implementations may return a bare float
+    try:
+        return float(lm)
+    except Exception:
+        return 0.0
+
+
+def _extract_yhat(pred: dict[str, Any]) -> float:
+    for k in ("y_hat", "yhat", "y_pred", "prediction", "y"):
+        if k in pred:
+            return float(pred[k])
+    raise KeyError("Prediction dict missing y_hat/yhat/y_pred/prediction/y")
+
+
+def _extract_intervals(pred: dict[str, Any], alpha: float) -> tuple[float, float]:
+    # direct fields first
+    if "interval_low" in pred and "interval_high" in pred:
+        return float(pred["interval_low"]), float(pred["interval_high"])
+    # otherwise look inside 'intervals'
+    iv = pred.get("intervals")
+    if isinstance(iv, dict) and iv:
+        # Try exact alpha keys like "alpha=0.10" or 0.1
+        key_variants = (f"alpha={alpha:.2f}", f"alpha={alpha}", alpha, str(alpha))
+        for k in key_variants:
+            if k in iv:
+                low, high = iv[k]
+                return float(low), float(high)
+        # Fallback: take the first interval
+        first = next(iter(iv.values()))
+        low, high = first
+        return float(low), float(high)
+    # nothing found → degenerate interval at the point prediction
+    yhat = _extract_yhat(pred)
+    return float(yhat), float(yhat)
+
+
 class BacktestRunner:
     def __init__(
         self,
@@ -15,7 +86,6 @@ class BacktestRunner:
         cp_threshold: float | None = None,
         cp_cooldown: int | None = None,
     ) -> None:
-        # NOTE: alpha kept for compatibility; wire into Pipeline interval building later if needed.
         self.alpha = float(alpha)
         self.cp_tol = int(cp_tol)
         self.cp_threshold = cp_threshold
@@ -37,27 +107,30 @@ class BacktestRunner:
         prev_latency: float = 0.0
 
         for tick in stream:
+            # feed last tick's truth before predicting current tick
             if prev_tick is not None:
-                pipe.update_truth(float(prev_tick["x"]))
+                _ingest_truth(pipe, float(prev_tick["x"]))
 
-            pred = pipe.process(tick)
-            curr_latency = float(pred.get("latency_ms", {}).get("total_ms", 0.0))
+            pred = _predict(pipe, tick)
+            curr_latency = _extract_latency_ms(pred)
 
             if prev_pred is not None:
+                # Evaluate last prediction against current truth
                 y_true_seq.append(float(tick["x"]))
-                y_pred_seq.append(float(prev_pred["y_hat"]))
-                ql_seq.append(float(prev_pred["interval_low"]))
-                qh_seq.append(float(prev_pred["interval_high"]))
+                y_pred_seq.append(_extract_yhat(prev_pred))
+                ql, qh = _extract_intervals(prev_pred, self.alpha)
+                ql_seq.append(ql)
+                qh_seq.append(qh)
 
                 cp_true = float(tick.get("cp", tick.get("is_cp", 0.0)) or 0.0)
 
                 log.append(
                     {
-                        "t": tick["timestamp"],
+                        "t": tick.get("timestamp"),
                         "y": float(tick["x"]),
-                        "y_hat": float(prev_pred["y_hat"]),
-                        "ql": float(prev_pred["interval_low"]),
-                        "qh": float(prev_pred["interval_high"]),
+                        "y_hat": _extract_yhat(prev_pred),
+                        "ql": ql,
+                        "qh": qh,
                         "regime": str(prev_pred.get("regime", "")),
                         "score": float(prev_pred.get("score", 0.0)),
                         "cp_prob": float(prev_pred.get("score", 0.0)),

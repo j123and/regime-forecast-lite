@@ -1,145 +1,188 @@
+# core/pipeline.py
 from __future__ import annotations
 
-import time
-from collections import OrderedDict
-from typing import cast
+from collections import OrderedDict, deque
+from math import isnan
+from typing import Any
 
-from models.ewma import EWMAModel
+from core.config import load_config
+from core.features import FeatureExtractor
+from core.types import Tick
 
-from .conformal import OnlineConformal
-from .detect.bocpd import BOCPD
-from .features import FeatureExtractor
-from .types import OnlineModel, Tick
+
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    try:
+        f = float(v)
+        return 0.0 if isnan(f) else f
+    except Exception:
+        return default
+
+
+def _percentile(sorted_list, q: float) -> float:
+    if not sorted_list:
+        return 0.0
+    q = min(max(q, 0.0), 1.0)
+    idx = int((len(sorted_list) - 1) * q)
+    return float(sorted_list[idx])
 
 
 class Pipeline:
-    def __init__(self, cfg: dict | None = None) -> None:
-        self.cfg = cfg or {}
+    """
+    Single-series, online pipeline:
+      - EWMA mean/std as a simple one-step-ahead forecaster
+      - Conformal intervals from absolute residuals (global + per-regime)
+      - Binary regimes by EWMA std threshold
+      - Pending map for service /truth matching by prediction_id
+    """
 
-        # features (keep minimal; no peeking inside FeatureExtractor)
-        fe_cfg = self.cfg.get("features", {})
-        self.fe = FeatureExtractor(
-            **{k: v for k, v in fe_cfg.items() if k in {"win", "rv_win", "ewm_alpha"}}
+    def __init__(self, cfg: dict[str, Any] | None = None) -> None:
+        self.cfg = cfg or load_config()
+        self.fx = FeatureExtractor(
+            alpha=float(self.cfg.get("ewma_alpha", 0.1)),
+            min_warmup=int(self.cfg.get("min_warmup", 20)),
         )
 
-        # single detector (BOCPD is fine here; tests already exist)
-        dcfg = self.cfg.get("detector", {})
-        self.det = BOCPD(
-            threshold=dcfg.get("threshold", 0.6),
-            cooldown=dcfg.get("cooldown", 5),
-            hazard=dcfg.get("hazard", 1 / 200),
-            rmax=dcfg.get("rmax", 400),
-            mu0=dcfg.get("mu0", 0.0),
-            kappa0=dcfg.get("kappa0", 1e-3),
-            alpha0=dcfg.get("alpha0", 1.0),
-            beta0=dcfg.get("beta0", 1.0),
-            vol_threshold=dcfg.get("vol_threshold", 0.02),
-        )
+        # Conformal quantile (e.g., 0.90 → ~90% central interval when residuals are i.i.d.)
+        self.q = float(self.cfg.get("conformal_q", 0.9))
+        self.maxlen = int(self.cfg.get("conformal_maxlen", 2000))
+        self.global_res: deque[float] = deque(maxlen=self.maxlen)
+        self.regime_res: dict[str, deque[float]] = {
+            "calm": deque(maxlen=self.maxlen),
+            "volatile": deque(maxlen=self.maxlen),
+        }
 
-        # single online model (EWMA)
-        self.model: OnlineModel = cast(
-            OnlineModel, EWMAModel(alpha=self.cfg.get("model_alpha", 0.2))
-        )
+        # Service book-keeping for /predict → /truth correlation
+        self.pending: OrderedDict[str, tuple[float, str]] = OrderedDict()
+        self.pending_cap = int(self.cfg.get("pending_cap", 4096))
 
-        # conformal intervals (single by default)
-        ccfg = self.cfg.get("conformal", {})
-        self.alpha_main = float(ccfg.get("alpha_main", 0.1))
-        self.alpha_list: list[float] = list(ccfg.get("alphas", [self.alpha_main]))
-        self.conf = OnlineConformal(
-            window=ccfg.get("window", 500),
-            decay=ccfg.get("decay", 1.0),
-            by_regime=ccfg.get("by_regime", False),  # simpler: global residuals by default
-            cold_scale=ccfg.get("cold_scale", 0.01),
-        )
+        # Regime threshold on EWMA std
+        self.vol_th = float(self.cfg.get("regime_vol_threshold", 0.01))
 
-        # pending predictions keyed by id (for /truth)
-        self._pending: OrderedDict[str, dict] = OrderedDict()
-        self._pending_cap: int = int(self.cfg.get("pending_cap", 4096))
+        # Remember last prediction so backtests can call update_truth(y) without IDs
+        self._last_y_hat: float | None = None
+        self._last_regime: str | None = None
 
-        # NEW: last prediction for backtester (no ids needed)
-        self._last_pending: dict[str, float | str] | None = None
+    # --------- service hooks ---------
+    def register_prediction(self, pred_id: str, y_hat: float, regime: str) -> None:
+        self.pending[pred_id] = (float(y_hat), str(regime))
+        self.pending.move_to_end(pred_id)
+        while len(self.pending) > self.pending_cap:
+            self.pending.popitem(last=False)
 
-    # ---------- public API used by the service ----------
-
-    def register_prediction(self, pred_id: str, y_hat: float, regime_label: str | None) -> None:
-        self._pending[pred_id] = {"y_hat": float(y_hat), "regime": regime_label}
-        while len(self._pending) > self._pending_cap:
-            self._pending.popitem(last=False)
+    def _learn_residual(self, y_true: float, y_hat: float, regime: str | None) -> None:
+        """Update residual buffers (global + regime) with |y - y_hat|."""
+        try:
+            r = abs(float(y_true) - float(y_hat))
+        except Exception:
+            return
+        self.global_res.append(r)
+        if regime and regime in self.regime_res:
+            self.regime_res[regime].append(r)
 
     def update_truth_by_id(self, pred_id: str, y_true: float) -> bool:
-        item = self._pending.pop(pred_id, None)
-        if item is None:
+        tup = self.pending.pop(pred_id, None)
+        if tup is None:
             return False
-        self.conf.update(float(item["y_hat"]), float(y_true), item.get("regime"))
+        y_hat, regime = tup
+        self._learn_residual(y_true, y_hat, regime)
         return True
 
-    def pending_count(self) -> int:
-        return len(self._pending)
-
-    # ---------- NEW: simple updater for the backtester ----------
-
-    def update_truth(self, y_true: float) -> None:
+    # Backtests (and the service if desired) can call this without a prediction_id.
+    def update_truth(self, y: float, prediction_id: str | None = None) -> None:
         """
-        Update conformal buffers using the most recent prediction produced by `process`.
-        Safe no-op if called before any prediction.
+        Ingest realized truth for the most recent prediction (or for a specific prediction_id).
         """
-        if self._last_pending is None:
+        if prediction_id is not None:
+            # Defer to the ID-based path used by the service
+            self.update_truth_by_id(str(prediction_id), float(y))
             return
-        self.conf.update(
-            float(self._last_pending.get("y_hat", 0.0)),
-            float(y_true),
-            str(self._last_pending.get("regime") or ""),
-        )
-        self._last_pending = None
+        # Learn against the last prediction produced by process()
+        if self._last_y_hat is None:
+            return
+        self._learn_residual(float(y), float(self._last_y_hat), self._last_regime)
 
-    # ---------- main processing ----------
+    # --------- main step ---------
+    def process(self, tick: Tick) -> dict[str, Any]:
+        x = _safe_float(tick["x"])
+        f = self.fx.update(x)
+        mean = float(f["ewm_mean"])
+        std = float(f["ewm_std"])
+        warmup = bool(f["warmup"])
 
-    def process(self, tick: Tick) -> dict:
-        t0 = time.perf_counter()
+        # Forecast: next-tick mean proxy
+        y_hat = mean
 
-        # 1) features
-        feats = self.fe.update(tick)
-        t1 = time.perf_counter()
+        # Regime by scale threshold
+        regime = "volatile" if std >= self.vol_th else "calm"
 
-        # 2) detector
-        det = self.det.update(float(tick["x"]), feats)
-        t2 = time.perf_counter()
+        # Build interval radius from residual buffers (per-regime with global fallback)
+        reg_buf = list(self.regime_res.get(regime, deque()))
+        reg_buf.sort()
+        glob = list(self.global_res)
+        glob.sort()
 
-        # 3) model predict+update
-        y_hat, _ = self.model.predict_update(tick, feats)
-        t3 = time.perf_counter()
+        r_reg = _percentile(reg_buf, self.q) if reg_buf else 0.0
+        r_glob = _percentile(glob, self.q) if glob else 0.0
 
-        # 4) intervals from current conformal state
-        vol_hint = float(feats.get("ewm_vol") or feats.get("rv") or 0.01)
-        ql, qh = self.conf.interval(
-            y_hat, alpha=self.alpha_main, regime_label=det["regime_label"], scale_hint=vol_hint
-        )
-        multi = self.conf.interval(
-            y_hat,
-            regime_label=det["regime_label"],
-            scale_hint=vol_hint,
-            alphas_multi=self.alpha_list,
-        )
-        t4 = time.perf_counter()
+        degraded = False
+        if len(reg_buf) < 30 and r_glob > r_reg:
+            r = r_glob
+            degraded = True
+        else:
+            r = max(r_reg, r_glob)
 
-        # remember for `update_truth`
-        self._last_pending = {"y_hat": float(y_hat), "regime": str(det["regime_label"])}
+        interval_low = y_hat - r
+        interval_high = y_hat + r
 
-        lat = {
-            "features_ms": (t1 - t0) * 1000.0,
-            "detector_ms": (t2 - t1) * 1000.0,
-            "model_ms": (t3 - t2) * 1000.0,
-            "conformal_ms": (t4 - t3) * 1000.0,
-            "total_ms": (t4 - t0) * 1000.0,
+        # Detector score proxy from volatility; [0, 1] clipped
+        score = min(max(std / max(self.vol_th, 1e-12), 0.0), 1.0)
+
+        # Remember last prediction so update_truth() can learn next tick
+        self._last_y_hat = float(y_hat)
+        self._last_regime = str(regime)
+
+        # Keep both explicit bounds and an intervals map for compatibility
+        intervals = {
+            f"alpha={1.0 - self.q:.2f}": [interval_low, interval_high],
+            str(int(self.q * 100)): [interval_low, interval_high],  # legacy key
         }
 
         return {
-            "y_hat": float(y_hat),
-            "interval_low": float(ql),
-            "interval_high": float(qh),
-            "regime": det["regime_label"],
-            "score": float(det["regime_score"]),
-            "latency_ms": lat,
-            "warmup": len(self.conf.res_global) < 30,
-            "intervals": multi if isinstance(multi, dict) else {},
+            "y_hat": y_hat,
+            "interval_low": interval_low,
+            "interval_high": interval_high,
+            "intervals": intervals,
+            "regime": regime,
+            "score": score,
+            "warmup": warmup,
+            "degraded": degraded,
         }
+
+    # --------- snapshot state (buffers + pending only) ---------
+    def state_dict(self) -> dict[str, Any]:
+        return {
+            "global_res": list(self.global_res),
+            "regime_res": {k: list(v) for k, v in self.regime_res.items()},
+            "pending": [
+                {"prediction_id": pid, "y_hat": yh, "regime": rg}
+                for pid, (yh, rg) in self.pending.items()
+            ],
+        }
+
+    @classmethod
+    def from_state(cls, cfg: dict[str, Any] | None, state: dict[str, Any]) -> Pipeline:
+        self = cls(cfg)
+        for v in state.get("global_res", []):
+            self.global_res.append(float(v))
+        for k in ("calm", "volatile"):
+            for v in state.get("regime_res", {}).get(k, []):
+                self.regime_res[k].append(float(v))
+        for rec in state.get("pending", []):
+            pid = rec.get("prediction_id")
+            if pid:
+                self.register_prediction(
+                    str(pid),
+                    float(rec.get("y_hat", 0.0)),
+                    str(rec.get("regime", "calm")),
+                )
+        return self
