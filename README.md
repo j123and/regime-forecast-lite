@@ -199,6 +199,39 @@ Machine: Intel i5-10400F (OC ~4 GHz), local loopback
 Notes: Backtest latencies exclude HTTP; the service benchmark measures JSON encode/decode + request handling over loopback. CP metrics on market data are N/A (no labels). On synthetic, low CP precision indicates detector chatter; tune threshold/cooldown if you care about precision.
 
 ---
+### AAPL 1h backtest (last 800 points)
+
+Command to reproduce:
+
+```bash
+python scripts/plot_backtest.py \
+  --data data/aapl_1h_logret.csv \
+  --profile market \
+  --alpha 0.1 \
+  --cp_tol 10 \
+  --last 800 \
+  --out artifacts/plot_aapl.png
+```
+
+![AAPL 1h backtest — last 800 points](artifacts/plot_aapl.png)
+
+What you’re seeing:
+
+* **Blue** = observed `x` (log returns).
+* **Orange** = EWMA next-tick prediction `y_hat`.
+* **Shaded band** = **90%** prediction interval (α=0.10) from online conformal; it widens in volatile patches and tightens in calm periods.
+
+Headline metrics for this window (also shown in the title):
+
+* **MAE=0.004424**, **RMSE=0.007464**, **Coverage≈0.904** (close to the 0.90 target).
+* **Compute time (offline)**: **p50≈0.1 ms**, **p95≈0.3 ms** per `process()` call.
+
+Notes:
+
+* These latencies are **compute-time only** (no HTTP). End-to-end **service** latency over loopback measured separately: **p50≈0.99 ms**, **p95≈1.45 ms** (single worker, Intel i5-10400F OC \~4 GHz).
+* Change-point metrics are N/A here (no labeled CP truth on market data).
+
+
 ## Backtesting
 
 From CSV with `timestamp,x` (and optional `rv`):
