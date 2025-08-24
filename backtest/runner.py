@@ -2,18 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Any
+import time
 
 from .metrics import coverage, latency_p50_p95, mae, rmse, smape
 
 
 def _ingest_truth(pipe, y: float, prediction_id: str | None = None):
-    # Preferred: update_truth(y[, prediction_id])
+    """Feed realized truth into whatever method the pipeline exposes."""
     if hasattr(pipe, "update_truth"):
         try:
             return pipe.update_truth(y=y, prediction_id=prediction_id)
         except TypeError:
             return pipe.update_truth(y)
-    # Fallbacks: update(y) / learn_one(y) / observe_truth(y) / on_truth(y)
     for name in ("update", "learn_one", "observe_truth", "on_truth"):
         if hasattr(pipe, name):
             return getattr(pipe, name)(y)
@@ -35,15 +35,16 @@ def _predict(pipe, tick: dict[str, Any]) -> dict[str, Any]:
 
 def _extract_latency_ms(pred: dict[str, Any]) -> float:
     lm = pred.get("latency_ms") or {}
-    # Prefer total_ms if present; else service_ms; else 0.0
     if isinstance(lm, dict):
-        if "total_ms" in lm:
-            return float(lm["total_ms"])
-        if "service_ms" in lm:
-            return float(lm["service_ms"])
-    # Some implementations may return a bare float
+        # Prefer total_ms; else service_ms; else compute_ms if someone set it
+        for k in ("total_ms", "service_ms", "compute_ms"):
+            if k in lm:
+                try:
+                    return float(lm[k])
+                except Exception:
+                    pass
     try:
-        return float(lm)
+        return float(lm)  # if someone returns a bare float
     except Exception:
         return 0.0
 
@@ -56,23 +57,18 @@ def _extract_yhat(pred: dict[str, Any]) -> float:
 
 
 def _extract_intervals(pred: dict[str, Any], alpha: float) -> tuple[float, float]:
-    # direct fields first
     if "interval_low" in pred and "interval_high" in pred:
         return float(pred["interval_low"]), float(pred["interval_high"])
-    # otherwise look inside 'intervals'
     iv = pred.get("intervals")
     if isinstance(iv, dict) and iv:
-        # Try exact alpha keys like "alpha=0.10" or 0.1
         key_variants = (f"alpha={alpha:.2f}", f"alpha={alpha}", alpha, str(alpha))
         for k in key_variants:
             if k in iv:
                 low, high = iv[k]
                 return float(low), float(high)
-        # Fallback: take the first interval
         first = next(iter(iv.values()))
         low, high = first
         return float(low), float(high)
-    # nothing found → degenerate interval at the point prediction
     yhat = _extract_yhat(pred)
     return float(yhat), float(yhat)
 
@@ -111,8 +107,20 @@ class BacktestRunner:
             if prev_tick is not None:
                 _ingest_truth(pipe, float(prev_tick["x"]))
 
+            # measure compute-time for this prediction
+            t0 = time.perf_counter()
             pred = _predict(pipe, tick)
+            t1 = time.perf_counter()
+            compute_ms = (t1 - t0) * 1000.0
+
+            # prefer latency reported by the model/service; else use compute time
             curr_latency = _extract_latency_ms(pred)
+            if curr_latency == 0.0:
+                curr_latency = compute_ms
+                # expose it for anyone who reads the pred dict downstream
+                pred.setdefault("latency_ms", {})  # type: ignore[arg-type]
+                if isinstance(pred["latency_ms"], dict):  # type: ignore[index]
+                    pred["latency_ms"]["compute_ms"] = compute_ms  # type: ignore[index]
 
             if prev_pred is not None:
                 # Evaluate last prediction against current truth
