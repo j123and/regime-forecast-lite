@@ -4,10 +4,13 @@
 Minimal streaming forecaster with a leakage-safe pipeline and an optional FastAPI service.
 
 * **Model:** online EWMA, one-step-ahead forecast
-* **Change-points:** lightweight BOCPD-like detector
+* **Change-points:** simple z-score heuristic (BOCPD-style interface; non-Bayesian)
 * **Uncertainty:** online conformal (absolute residuals)
-* **Service:** `/predict → /truth` flow, idempotent updates, Prometheus metrics
+* **Service:** single-process FastAPI: `/predict → /truth` flow, idempotent updates, Prometheus metrics
 * **Backtesting:** CLI with coverage/latency/CP metrics + plots
+
+## Why this exists
++Small, leak-safe, and testable online baseline: shows a clean `/predict → /truth` loop, idempotency, and simple uncertainty without pretending to be a SOTA time-series model.
 
 ## 60-second demo
 
@@ -18,8 +21,10 @@ source .venv/bin/activate
 pip install -U pip
 pip install -e ".[service,backtest]"  # add ,[dev] if you want tests/lint
 
-# 2) Run the API (single worker; no auth or rate limit by default)
+# 2) Run the API — **single process only** (no shared state across workers). Auth/rate limit off by default.
 uvicorn service.app:app --host 0.0.0.0 --port 8000 --workers 1 &
+
+# DO NOT set --workers >1 unless you accept per-worker islands of state.
 
 # 3) Get a prediction
 curl -s -X POST http://localhost:8000/predict \
@@ -30,7 +35,7 @@ curl -s -X POST http://localhost:8000/predict \
 PID=$(curl -s -X POST http://localhost:8000/predict -H "Content-Type: application/json" \
        -d '{"timestamp":"2024-01-01T00:05:00Z","x":0.02}' | jq -r .prediction_id)
 curl -s -X POST http://localhost:8000/truth -H "Content-Type: application/json" \
-  -d "{\"prediction_id\":\"$PID\",\"y\":0.03}" | jq .
+  -d "{\"prediction_id\":\"$PID\",\"y_true\":0.03}" | jq .
 
 # replay (idempotent → true)
 curl -s -X POST http://localhost:8000/truth -H "Content-Type: application/json" \
@@ -111,10 +116,11 @@ Response:
 
 ### `POST /truth`
 
-Provide either a `prediction_id`, or `(series_id, target_timestamp)`. One of `y`, `y_true`, or `value`.
+Provide either a `prediction_id`, or `(series_id, target_timestamp)`. Use `y_true` for the observed value (aliases `y` and `value` are accepted).
+
 
 ```json
-{ "prediction_id": "uuid", "y": 0.02 }
+{ "prediction_id": "uuid", "y_true": 0.02 }
 ```
 
 Response:
@@ -139,7 +145,8 @@ All optional. Defaults are sensible for local/dev.
 
 * `SERVICE_API_KEY` — if set, `/predict` and `/truth` require header `x-api-key: <key>`.
 * `RATE_LIMIT_PER_MINUTE` — per-key windowed counter; set `>0` to enable.
-* `SNAPSHOT_PATH` — JSON snapshot path for in-memory state on shutdown/start.
+* * Best-effort on clean shutdown. On crash you may lose recent state; use periodic external snapshots if you care about durability.
+
 * `PENDING_CAP` — max pending predictions indexed for `/truth` matching.
 * `max_series` — LRU cap for series pipelines in memory.
 * `truth_ttl_sec`, `truth_max_ids` — idempotency cache tuning.
@@ -176,7 +183,7 @@ docker run --rm -p 8000:8000 \
 ```
 MAE=0.0208  RMSE=0.0298  Coverage=0.9116
 Latency (backtest): p50=0.0 ms, p95=0.0 ms
-CP: precision=0.04, recall=1.00, earliness≈7.88 ticks, chatter≈200/1000
+CP: precision=0.04, recall=1.00, earliness≈7.88 ticks, chatter≈200/1000 (expected chatter; simple heuristic—tune threshold/cooldown if you need precision)
 N=2999
 ```
 
@@ -271,12 +278,12 @@ Takeaway: EWMA improves on RW (\~27% MAE, \~25% RMSE), but AR(1) is slightly bet
 * **Idempotent truth**: replays are detected and return `idempotent: true`.
 * **Pending index**: truth can match by `prediction_id` or by `(series_id, target_timestamp)`.
 * **Uncertainty**: conformal intervals over absolute residuals; simple and fast.
-* **Detector**: simple z-score mapping packaged behind a BOCPD-like API.
+* **Detector**: z-score thresholding behind a BOCPD-style interface (no Bayesian inference).
 
 ## Limitations 
 
 * No shared state across workers or processes. Run a single worker or accept per-worker islands.
-* Snapshot is a single JSON file with best-effort replace on shutdown.
+* Snapshot is a single JSON file with best-effort replace on shutdown; a crash can drop recent in-memory state.
 * Rate limiting and auth are minimal. Put a proxy in front of this for real traffic.
 * The “BOCPD” here is intentionally simple for speed and testability.
 
