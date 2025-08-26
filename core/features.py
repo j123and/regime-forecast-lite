@@ -16,7 +16,7 @@ def _sf(v: float, d: float = 0.0) -> float:
 
 class FeatureExtractor:
     """
-    Junior/simple streaming features:
+    streaming features:
       - EWMA mean m_t
       - EWMA second moment s_t -> var = s_t - m_t^2  (floored at 0)
       - warmup flag
@@ -34,7 +34,7 @@ class FeatureExtractor:
         rv_win: int | None = None,        # kept for compatibility; not used
         ewm_alpha: float | None = None,
         *,
-        alpha: float | None = None,       # modern name (optional)
+        alpha: float | None = None,       
         min_warmup: int = 20,
     ) -> None:
         if ewm_alpha is not None:

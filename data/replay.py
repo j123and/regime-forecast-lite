@@ -48,8 +48,8 @@ class Replay:
     def __iter__(self) -> Iterator[dict[str, Any]]:
         ext = os.path.splitext(self.path)[1].lower()
 
-        # CSV (and simple gz naming)
-        if ext == ".csv" or ext == ".gz" or self.path.lower().endswith(".csv.gz"):
+        # CSV
+        if ext == ".csv":
             import csv
 
             with open(self.path, newline="", encoding="utf-8") as f:
@@ -75,7 +75,6 @@ class Replay:
                     yield tick
             return
 
-        # Parquet path
         # Parquet path
         try:
             import pyarrow.parquet as pq  # no type: ignore
@@ -126,7 +125,7 @@ class Replay:
                 cov = {
                     c: float(r[c]) for c in self.covar_cols if c in df.columns and pd.notna(r[c])
                 }
-                row_out: dict[str, Any] = {  # renamed from `rec` to avoid redefinition
+                row_out: dict[str, Any] = {
                     "timestamp": str(r[self.ts_col]),
                     "x": float(r[self.y_col]),
                     "covariates": cov,

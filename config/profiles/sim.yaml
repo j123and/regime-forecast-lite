@@ -1,3 +1,6 @@
+# Sim streams usually need a lower vol threshold
+regime_vol_threshold: 0.02
+
 detector:
   threshold: 0.045
   hazard: 0.0125
@@ -7,6 +10,7 @@ detector:
   alpha0: 4.0
   beta0: 0.0008
   vol_threshold: 0.02
+
 router:
   freeze_on_recent_cp: true
   freeze_ticks: 5

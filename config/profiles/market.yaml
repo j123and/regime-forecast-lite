@@ -1,13 +1,16 @@
+# Only override what you actually want different from default
+regime_vol_threshold: 0.02
+
 detector:
-  # p99 on AAPL ~ 0.1825 → set below that to curb chatter
   threshold: 0.14
-  hazard: 0.004        # ~1/250, calmer
+  hazard: 0.004
   cooldown: 10
   mu0: 0.0
   kappa0: 1.0
   alpha0: 4.0
   beta0: 0.0008
   vol_threshold: 0.02
+
 router:
   freeze_on_recent_cp: true
   freeze_ticks: 7

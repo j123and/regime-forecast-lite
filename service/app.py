@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI):
     finally:
         # save snapshot on shutdown
         _save_snapshot()
+
 # ---------- app & logging ----------
 app = FastAPI(lifespan=lifespan)
 
@@ -46,6 +47,18 @@ if not logger.handlers:
 
 # ---------- config ----------
 cfg = load_config()
+
+def _int_from_env_or_cfg(env_name: str, cfg_key: str, default: int) -> int:
+    v = os.getenv(env_name)
+    if v is not None:
+        try:
+            return int(v)
+        except Exception:
+            return default
+    try:
+        return int(cfg.get(cfg_key, default))
+    except Exception:
+        return default
 
 # ---------- Prometheus: PRIVATE registry to avoid duplicates on reload ----------
 PROM_REG = CollectorRegistry()
@@ -58,7 +71,7 @@ SERVICE_LAT = Histogram(
 )
 
 # ---------- series-sharded pipelines ----------
-_MAX_SERIES = int(cfg.get("max_series", 1024))
+_MAX_SERIES = _int_from_env_or_cfg("MAX_SERIES", "max_series", 1024)
 _pipes: OrderedDict[str, Pipeline] = OrderedDict()
 _pipe_locks: defaultdict[str, Lock] = defaultdict(Lock)
 
@@ -105,22 +118,49 @@ def _mark_applied(pid: str) -> None:
 
 # ---------- pending indices ----------
 _PENDING_BY_KEY: OrderedDict[tuple[str, str], str] = OrderedDict()
-_PENDING_CAP = int(cfg.get("pending_cap", 4096))
+_PENDING_CAP = _int_from_env_or_cfg("PENDING_CAP", "pending_cap", 4096)
 
 _PID_TO_SERIES: OrderedDict[str, str] = OrderedDict()
-_PID_INDEX_CAP = int(cfg.get("pid_index_cap", _PENDING_CAP * 2))
+_PID_INDEX_CAP = _int_from_env_or_cfg("PID_INDEX_CAP", "pid_index_cap", _PENDING_CAP * 2)
+
+def _evict_oldest_pending_if_needed() -> None:
+    """
+    FIFO-evict oldest pending entries until capacity is respected.
+    Also drop the reverse index and try to evict from the pipeline (best-effort).
+    """
+    while _PENDING_CAP > 0 and len(_PENDING_BY_KEY) >= _PENDING_CAP:
+        (sid_ev, tgt_ev), pid_ev = _PENDING_BY_KEY.popitem(last=False)
+
+        # remove reverse index
+        _PID_TO_SERIES.pop(pid_ev, None)
+
+        # try to evict from an existing pipeline (do not create a new one)
+        pipe = _pipes.get(sid_ev)
+        if pipe is not None:
+            lock = _pipe_locks[sid_ev]
+            try:
+                with lock:
+                    # optional: available in our Pipeline; ignore if not present
+                    if hasattr(pipe, "evict_prediction"):
+                        pipe.evict_prediction(pid_ev)  # type: ignore[attr-defined]
+            except Exception:
+                # keep eviction best-effort; pending maps are already consistent
+                pass
+
+    # enforce reverse index size separately
+    while len(_PID_TO_SERIES) > _PID_INDEX_CAP:
+        _PID_TO_SERIES.popitem(last=False)
 
 def _remember_pending(series_id: str, target_ts: str, pred_id: str) -> None:
+    # Evict BEFORE inserting the new pending to ensure global cap semantics.
+    _evict_oldest_pending_if_needed()
+
     key = (series_id, target_ts)
     _PENDING_BY_KEY[key] = pred_id
     _PENDING_BY_KEY.move_to_end(key)
-    while len(_PENDING_BY_KEY) > _PENDING_CAP:
-        _PENDING_BY_KEY.popitem(last=False)
 
     _PID_TO_SERIES[pred_id] = series_id
     _PID_TO_SERIES.move_to_end(pred_id)
-    while len(_PID_TO_SERIES) > _PID_INDEX_CAP:
-        _PID_TO_SERIES.popitem(last=False)
 
 def _resolve_pred_id(prediction_id: str | None, series_id: str | None, target_ts: str | None) -> str | None:
     if prediction_id:
@@ -217,7 +257,7 @@ def _load_snapshot() -> None:
         with open(_SNAPSHOT_PATH, encoding="utf-8") as f:
             state = json.load(f)
     except Exception as e:
-        logger.warning(f'{"evt":"snapshot_load_error","err":"%s"}', str(e))
+        logger.warning(f'{{"evt":"snapshot_load_error","err":"%s"}}', str(e))
         return
 
     _APPLIED.clear()
@@ -246,7 +286,7 @@ def _load_snapshot() -> None:
         try:
             _pipes[sid] = Pipeline.from_state(cfg, pst)
         except Exception as e:
-            logger.warning(f'{"evt":"pipe_restore_error","series_id":"%s","err":"%s"}', sid, str(e))
+            logger.warning(f'{{"evt":"pipe_restore_error","series_id":"%s","err":"%s"}}', sid, str(e))
 
 @app.on_event("shutdown")
 def _save_snapshot() -> None:
@@ -267,7 +307,7 @@ def _save_snapshot() -> None:
             json.dump(state, f)
         os.replace(tmp, _SNAPSHOT_PATH)
     except Exception as e:
-        logger.warning(f'{"evt":"snapshot_save_error","err":"%s"}', str(e))
+        logger.warning(f'{{"evt":"snapshot_save_error","err":"%s"}}', str(e))
 
 # ---------- endpoints ----------
 @app.get("/healthz")
@@ -355,6 +395,7 @@ def truth(request: Request, payload: TruthIn) -> TruthOut:
 
     series_id = _PID_TO_SERIES.get(pid) or payload.series_id
     if not series_id:
+        # if it was evicted, we don't know which series to update → 404
         raise HTTPException(status_code=404, detail="Unknown prediction reference (series missing).")
 
     lock = _pipe_locks[series_id]
@@ -370,8 +411,9 @@ def truth(request: Request, payload: TruthIn) -> TruthOut:
                 idempotent=True,
             )
 
-        applied = pipe.update_truth_by_id(pid, float(y_val))
+        applied = getattr(pipe, "update_truth_by_id")(pid, float(y_val))
         if not applied:
+            # not pending anymore (evicted or unknown)
             raise HTTPException(status_code=404, detail="Unknown prediction reference (not pending).")
         _mark_applied(pid)
 

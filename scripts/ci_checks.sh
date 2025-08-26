@@ -29,19 +29,28 @@ r=d["hit"].rolling(200,min_periods=200).mean().iloc[-1] if len(d)>=200 else d["h
 print({"roll200":float(r)}); sys.exit(0 if r>=0.85 else 1)
 PY
 
-# 3) residual alignment
+# 3) residual alignment: pipeline's buffer quantile vs log residual quantile
 python - <<'PY'
-from backtest.runner import BacktestRunner; from core.config import load_config
-from core.pipeline import Pipeline; from data.replay import Replay; import pandas as pd, numpy as np, sys
-from core.conformal import _weighted_quantile
-m,log=BacktestRunner(alpha=0.1,cp_tol=10).run(Pipeline(load_config(profile="market")),
-  Replay("data/aapl_1h_logret.csv", covar_cols=["rv","ewm_vol","ac1","z"]))
-d=pd.DataFrame(log).dropna(subset=["y","y_hat"])
-q_df=float(np.quantile((d["y"]-d["y_hat"]).abs(),0.9)) if len(d) else 0.0
-from core.pipeline import Pipeline as P; p=P(load_config(profile="market"))
-q_buf=float(_weighted_quantile(list(p.conf.res_global), list(p.conf.wts_global),0.9)) if p.conf.res_global else q_df
-ratio=(q_buf/q_df) if q_df>0 else 1.0
-print({"ratio":ratio}); sys.exit(0 if 0.8<=ratio<=1.25 else 1)
+from backtest.runner import BacktestRunner
+from core.config import load_config
+from core.pipeline import Pipeline
+from data.replay import Replay
+import pandas as pd, numpy as np, sys
+
+p = Pipeline(load_config(profile="market"))
+m, log = BacktestRunner(alpha=0.1, cp_tol=10).run(
+    p, Replay("data/aapl_1h_logret.csv", covar_cols=["rv","ewm_vol","ac1","z"])
+)
+
+d = pd.DataFrame(log).dropna(subset=["y","y_hat"])
+q_df = float(np.quantile(np.abs(d["y"] - d["y_hat"]), 0.9)) if len(d) else 0.0
+
+buf = list(p.global_res)
+q_buf = float(np.quantile(buf, 0.9)) if buf else q_df
+
+ratio = (q_buf / q_df) if q_df > 0 else 1.0
+print({"ratio": float(ratio)})
+sys.exit(0 if 0.8 <= ratio <= 1.25 else 1)
 PY
 
 # 4) miss symmetry

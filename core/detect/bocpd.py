@@ -10,8 +10,6 @@ from core.types import DetectorOut, Features
 
 class BOCPD:
     """
-    Junior-grade "BOCPD-like" change detector.
-
     API compatibility with legacy ctor:
       BOCPD(threshold, hazard, rmax, mu0, kappa0, alpha0, beta0, vol_threshold=...)
     Only 'threshold' and 'vol_threshold' influence behavior here; others are accepted & ignored.

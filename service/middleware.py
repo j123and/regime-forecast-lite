@@ -1,23 +1,27 @@
 # service/middleware.py
-import time
+from __future__ import annotations
 
-from starlette.middleware.base import BaseHTTPMiddleware
+import time
+from typing import Callable
+
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import Response
 
 
 class ServiceTimingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         t0 = time.perf_counter()
         response = await call_next(request)
         ms = (time.perf_counter() - t0) * 1000.0
-        # if JSON response, inject field; otherwise add header
-        try:
-            body = b"".join([chunk async for chunk in response.body_iterator])
-            # rebuild Response with injected JSON "latency_ms": {"service_ms": ms}
-            import json
-            data = json.loads(body)
-            data.setdefault("latency_ms", {})["service_ms"] = round(ms, 3)
-            from starlette.responses import JSONResponse
-            return JSONResponse(data, status_code=response.status_code)
-        except Exception:
-            response.headers["X-Service-MS"] = f"{ms:.3f}"
-            return response
+
+        # add headers; do NOT read/modify the body
+        response.headers["X-Service-MS"] = f"{ms:.3f}"
+
+        # standard Server-Timing header (useful in browsers and tools)
+        # if something else already set it, append our metric
+        existing = response.headers.get("Server-Timing")
+        our_metric = f'app;dur={ms:.3f}'
+        response.headers["Server-Timing"] = f"{existing}, {our_metric}" if existing else our_metric
+
+        return response

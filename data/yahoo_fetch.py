@@ -21,7 +21,8 @@ def _get_close_frame(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
 
 
 def _pick_close_series(df: pd.DataFrame) -> pd.Series:
-    for key in ("Close", "Adj Close", "close", "AdjClose"):
+    # Prefer adjusted close for modeling, then raw close
+    for key in ("Adj Close", "AdjClose", "Close", "close"):
         if key in df.columns:
             s = df[key]
             return s.iloc[:, 0] if isinstance(s, pd.DataFrame) else s
@@ -66,14 +67,15 @@ def main() -> None:
         start=args.start,
         end=args.end,
         interval=args.interval,
-        auto_adjust=True,
+        auto_adjust=True,   # adjusted prices preferred
         actions=False,
         progress=False,
     )
     if df.empty:
-        raise SystemExit("No data returned. Try a shorter range or coarser interval (e.g., 1d).")
+        raise SystemExit("No data returned. Try a shorter range or a coarser interval (e.g., 1d).")
 
     df = _get_close_frame(df, args.ticker)
+    # Ensure UTC tz-aware, sorted
     df.index = pd.to_datetime(df.index, utc=True).tz_convert("UTC")
     df = df.sort_index()
 
@@ -82,7 +84,18 @@ def main() -> None:
     if args.field == "close":
         ser = close.copy()
     else:
-        ser = np.log(close).diff().dropna()
+        # Guard against non-positive prices before log
+        mask = close > 0.0
+        dropped = int((~mask).sum())
+        if dropped:
+            print(f"[yahoo_fetch] dropped {dropped} non-positive close rows before log-return calc.")
+        close_pos = close[mask]
+        if len(close_pos) < 2:
+            raise SystemExit("Not enough positive-price rows to compute log returns.")
+        ser = np.log(close_pos).diff().dropna()
+
+    if ser.empty:
+        raise SystemExit("No data points after processing. Nothing to write.")
 
     idx_utc = ser.index
     timestamps = idx_utc.strftime("%Y-%m-%dT%H:%M:%SZ")

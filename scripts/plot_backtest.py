@@ -14,14 +14,10 @@ from data.replay import Replay
 
 
 def _run_backtest(data: str, profile: str | None, config: str | None, alpha: float, cp_tol: int):
-    cfg = load_config(path=config, profile=profile) or {}
-    # enforce alpha at runtime
-    ccfg = cfg.setdefault("conformal", {})
-    ccfg["alpha_main"] = float(alpha)
-    alphas = list(ccfg.get("alphas", []))
-    if float(alpha) not in alphas:
-        alphas.append(float(alpha))
-    ccfg["alphas"] = alphas
+    # Load config and make sure the pipeline actually uses the requested alpha
+    # Pipeline expects a quantile, not alpha: q = 1 - alpha
+    cfg = load_config(config, profile) or {}
+    cfg["conformal_q"] = 1.0 - float(alpha)
 
     pipe = Pipeline(cfg)
     runner = BacktestRunner(alpha=alpha, cp_tol=cp_tol)
@@ -78,6 +74,9 @@ def main() -> None:
     if args.last > 0 and len(df) > args.last:
         df = df.tail(args.last)
 
+    if df.empty:
+        raise SystemExit("No rows to plot after timestamp parsing/trim.")
+
     # Figure
     fig, ax = plt.subplots(figsize=(12, 6))
 
@@ -98,9 +97,9 @@ def main() -> None:
         for x in cp_idx:
             ax.vlines(x, ymin=ymin, ymax=ymin + 0.05 * (ymax - ymin), linewidth=1)
 
-    # Shade high-volatility regime spans
+    # Shade "volatile" regime spans (matches Pipeline output)
     if "regime" in df.columns:
-        high_mask = df["regime"].astype(str).eq("high_vol")
+        high_mask = df["regime"].astype(str).eq("volatile")
         for start, end in _contiguous_ranges(high_mask):
             ax.axvspan(start, end, alpha=0.08, label=None)
 

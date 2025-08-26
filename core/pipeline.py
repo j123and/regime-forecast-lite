@@ -68,6 +68,10 @@ class Pipeline:
         self.pending.move_to_end(pred_id)
         while len(self.pending) > self.pending_cap:
             self.pending.popitem(last=False)
+    
+    def evict_prediction(self, pred_id: str) -> None:
+        """Best-effort local eviction for service-level pending eviction."""
+        self.pending.pop(pred_id, None)
 
     def _learn_residual(self, y_true: float, y_hat: float, regime: str | None) -> None:
         """Update residual buffers (global + regime) with |y - y_hat|."""

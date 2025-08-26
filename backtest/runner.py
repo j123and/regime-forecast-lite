@@ -132,6 +132,10 @@ class BacktestRunner:
 
                 cp_true = float(tick.get("cp", tick.get("is_cp", 0.0)) or 0.0)
 
+                # prefer real cp_prob if present; otherwise fall back to score
+                score_val = float(prev_pred.get("score", prev_pred.get("cp_prob", 0.0)))
+                cp_prob_val = float(prev_pred.get("cp_prob", score_val))
+
                 log.append(
                     {
                         "t": tick.get("timestamp"),
@@ -140,8 +144,8 @@ class BacktestRunner:
                         "ql": ql,
                         "qh": qh,
                         "regime": str(prev_pred.get("regime", "")),
-                        "score": float(prev_pred.get("score", 0.0)),
-                        "cp_prob": float(prev_pred.get("score", 0.0)),
+                        "score": score_val,
+                        "cp_prob": cp_prob_val,
                         "cp_true": cp_true,
                         "lat_total_ms": float(prev_latency),
                     }

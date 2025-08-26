@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from collections import deque
+from math import ceil
 
 
 def _unweighted_quantile(vals: list[float], q: float) -> float:
-    # linear interpolation between order stats
+    # linear interpolation between order stats (kept for internal use)
     n = len(vals)
     if n == 0:
         return 0.0
@@ -19,6 +20,25 @@ def _unweighted_quantile(vals: list[float], q: float) -> float:
     hi = min(lo + 1, n - 1)
     frac = pos - lo
     return float(s[lo] * (1.0 - frac) + s[hi] * frac)
+
+
+def _unweighted_quantile_strict(vals: list[float], q: float) -> float:
+    """
+    Finite-sample conservative quantile:
+    k = ceil((n + 1) * q), clamped to [1, n]; return the k-th order statistic.
+    This mirrors the classic split-conformal rank choice and tends to be a bit conservative.
+    """
+    n = len(vals)
+    if n == 0:
+        return 0.0
+    if q <= 0.0:
+        return float(min(vals))
+    if q >= 1.0:
+        return float(max(vals))
+    s = sorted(vals)
+    k = ceil((n + 1) * q)
+    k = max(1, min(k, n))
+    return float(s[k - 1])
 
 
 def _effective_n(wts: list[float]) -> float:
@@ -51,6 +71,8 @@ class OnlineConformal:
       - sliding window + optional exponential decay
       - optional per-regime buffers
       - multi-alpha interval computation
+      - conservative finite-sample quantile in low-effective-N
+      - weighted global floor when using decay
     """
 
     def __init__(
@@ -59,11 +81,14 @@ class OnlineConformal:
         decay: float = 1.0,
         by_regime: bool = False,
         cold_scale: float = 0.01,
+        *,
+        min_eff_n: float = 30.0,  # new: was hard-coded
     ) -> None:
         self.window = int(window)
         self.decay = float(decay)
         self.by_regime = bool(by_regime)
         self.cold_scale = float(cold_scale)
+        self.min_eff_n = float(min_eff_n)
 
         self.res_global: deque[float] = deque(maxlen=self.window)
         self.wts_global: deque[float] = deque(maxlen=self.window)
@@ -72,9 +97,18 @@ class OnlineConformal:
         self._wts_by_regime: dict[str, deque[float]] = {}
 
     def _decay(self, wts: deque[float]) -> None:
+        if not wts:
+            return
         if self.decay < 1.0:
+            # exponential forgetting
             for i in range(len(wts)):
                 wts[i] *= self.decay
+            # simple renormalization to avoid underflow over long runs
+            m = max(wts) if wts else 0.0
+            if m > 0.0 and m < 1e-6:
+                scale = 1.0 / m
+                for i in range(len(wts)):
+                    wts[i] *= scale
 
     def _buffers_for(self, regime: str | None) -> tuple[deque[float], deque[float]]:
         if not self.by_regime or not regime:
@@ -110,19 +144,23 @@ class OnlineConformal:
                 base = scale_hint if scale_hint is not None else self.cold_scale
                 return float(base)
 
-            # guard: if effective N is small, use a safer unweighted 1−α quantile
-            eff = _effective_n(list(buf_wt)) if buf_wt else 0.0
-            if eff < 30.0:
-                q_unw = _unweighted_quantile(list(buf_res), 1.0 - a)
+            # guard: if effective N is small, use a safer unweighted (strict) 1−α quantile
+            eff = _effective_n(list(buf_wt)) if buf_wt else float(len(buf_res))
+            if eff < self.min_eff_n:
+                q_unw = _unweighted_quantile_strict(list(buf_res), 1.0 - a)
                 base = scale_hint if scale_hint is not None else self.cold_scale
                 return float(max(q_unw, float(base)))
 
             # main: weighted 1−α quantile from the active buffer
-            q_reg = _weighted_quantile(list(buf_res), list(buf_wt), 1.0 - a)
+            q_reg = _weighted_quantile(list(buf_res), list(buf_wt), 1.0 - a) if buf_wt else \
+                    _unweighted_quantile_strict(list(buf_res), 1.0 - a)
 
-            # HARD GLOBAL FLOOR: never smaller than the global 1−α scale
+            # GLOBAL FLOOR:
             if self.res_global:
-                q_glb = _unweighted_quantile(list(self.res_global), 1.0 - a)
+                if self.decay < 1.0 and self.wts_global:
+                    q_glb = _weighted_quantile(list(self.res_global), list(self.wts_global), 1.0 - a)
+                else:
+                    q_glb = _unweighted_quantile_strict(list(self.res_global), 1.0 - a)
                 q_reg = max(q_reg, q_glb)
             return float(q_reg)
 
