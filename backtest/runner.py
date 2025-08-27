@@ -17,7 +17,6 @@ def _ingest_truth(pipe, y: float, prediction_id: str | None = None):
     for name in ("update", "learn_one", "observe_truth", "on_truth"):
         if hasattr(pipe, name):
             return getattr(pipe, name)(y)
-    # No explicit truth method → assume pipeline self-updates in process()
     return None
 
 
@@ -36,7 +35,6 @@ def _predict(pipe, tick: dict[str, Any]) -> dict[str, Any]:
 def _extract_latency_ms(pred: dict[str, Any]) -> float:
     lm = pred.get("latency_ms") or {}
     if isinstance(lm, dict):
-        # Prefer total_ms; else service_ms; else compute_ms if someone set it
         for k in ("total_ms", "service_ms", "compute_ms"):
             if k in lm:
                 try:
@@ -44,7 +42,7 @@ def _extract_latency_ms(pred: dict[str, Any]) -> float:
                 except Exception:
                     pass
     try:
-        return float(lm)  # if someone returns a bare float
+        return float(lm) 
     except Exception:
         return 0.0
 
@@ -113,7 +111,7 @@ class BacktestRunner:
             t1 = time.perf_counter()
             compute_ms = (t1 - t0) * 1000.0
 
-            # prefer latency reported by the model/service; else use compute time
+
             curr_latency = _extract_latency_ms(pred)
             if curr_latency == 0.0:
                 curr_latency = compute_ms
@@ -167,7 +165,6 @@ class BacktestRunner:
         m["latency_p50_ms"] = p["p50"]
         m["latency_p95_ms"] = p["p95"]
 
-        # Optional CP metrics if available
         try:
             from .metrics import cp_event_metrics
 
