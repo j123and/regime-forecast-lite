@@ -7,7 +7,7 @@ class EWMAModel:
     """
     Tiny online EWMA forecaster.
     Predicts the next tick as the current EMA; then updates EMA with the current x.
-    No leakage: prediction uses EMA *before* seeing the next truth.
+    No leakage: prediction uses EMA before seeing the next truth.
     """
 
     def __init__(self, alpha: float = 0.2) -> None:
@@ -21,3 +21,4 @@ class EWMAModel:
         y_hat = 0.0 if self._ema is None else float(self._ema)
         self._ema = x if self._ema is None else self.alpha * x + (1.0 - self.alpha) * self._ema
         return y_hat, {}
+
