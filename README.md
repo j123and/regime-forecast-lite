@@ -6,11 +6,11 @@ Minimal streaming forecaster with a leakage-safe pipeline and an optional FastAP
 * **Model:** online EWMA, one-step-ahead forecast
 * **Change-points:** simple z-score heuristic (BOCPD-style interface; non-Bayesian)
 * **Uncertainty:** online conformal (absolute residuals)
-* **Service:** single-process FastAPI: `/predict → /truth` flow, idempotent updates, Prometheus metrics
+* **Service:** single-process FastAPI: `/predict -> /truth` flow, idempotent updates, Prometheus metrics
 * **Backtesting:** CLI with coverage/latency/CP metrics + plots
 
 ## Why this exists
-Small, leak-safe, and testable online baseline: shows a clean `/predict → /truth` loop, idempotency, and simple uncertainty without pretending to be a SOTA time-series model.
+Small, leak-safe, and testable online baseline: shows a clean `/predict -> /truth` loop, idempotency, and simple uncertainty without pretending to be a SOTA time-series model.
 
 ## 60-second demo
 
@@ -21,7 +21,7 @@ source .venv/bin/activate
 pip install -U pip
 pip install -e ".[service,backtest]"  # add ,[dev] if you want tests/lint
 
-# 2) Run the API — **single process only** (no shared state across workers). Auth/rate limit off by default.
+# 2) Run the API — single process only (no shared state across workers). Auth/rate limit off by default.
 uvicorn service.app:app --host 0.0.0.0 --port 8000 --workers 1 &
 
 # DO NOT set --workers >1 unless you accept per-worker islands of state.
@@ -37,7 +37,7 @@ PID=$(curl -s -X POST http://localhost:8000/predict -H "Content-Type: applicatio
 curl -s -X POST http://localhost:8000/truth -H "Content-Type: application/json" \
   -d "{\"prediction_id\":\"$PID\",\"y_true\":0.03}" | jq .
 
-# replay (idempotent → true)
+# replay (idempotent -> true)
 curl -s -X POST http://localhost:8000/truth -H "Content-Type: application/json" \
   -d "{\"prediction_id\":\"$PID\",\"y_true\":0.03}" | jq .
 
@@ -178,25 +178,25 @@ docker run --rm -p 8000:8000 \
 
 ### Results (reproducible)
 
-**Synthetic (`data/sim.csv`, α=0.10, `cp-threshold=0.6`, `cp-cooldown=5`)**
+Synthetic (`data/sim.csv`, α=0.10, `cp-threshold=0.6`, `cp-cooldown=5`)
 
 ```
 MAE=0.0208  RMSE=0.0298  Coverage=0.9116
 Latency (backtest): p50=0.0 ms, p95=0.0 ms
-CP: precision=0.04, recall=1.00, earliness≈7.88 ticks, chatter≈200/1000 (expected chatter; simple heuristic—tune threshold/cooldown if you need precision)
+CP: precision=0.04, recall=1.00, earliness=7.88 ticks, chatter=200/1000 (expected chatter; simple heuristic—tune threshold/cooldown if you need precision)
 N=2999
 ```
 
-**AAPL 1h (start=2024-08-01, α=0.10)**
+AAPL 1h (start=2024-08-01, α=0.10)
 
 ```
 MAE=0.004424  RMSE=0.007464  Coverage=0.9042
 Latency (backtest): p50=0.0 ms, p95=0.0 ms
-CP: (no ground-truth labels → N/A)
+CP: (no ground-truth labels -> N/A)
 N=1848
 ```
 
-**Service latency (HTTP, single worker, local)**
+Service latency (HTTP, single worker, local)
 
 ```
 Latency service_ms: p50=0.99 ms, p95=1.45 ms, N=1000
@@ -224,18 +224,18 @@ python scripts/plot_backtest.py \
 
 What you’re seeing:
 
-* **Blue** = observed `x` (log returns).
-* **Orange** = EWMA next-tick prediction `y_hat`.
-* **Shaded band** = **90%** prediction interval (α=0.10) from online conformal; it widens in volatile patches and tightens in calm periods.
+* Blue = observed `x` (log returns).
+* Orange = EWMA next-tick prediction `y_hat`.
+* Shaded band = 90% prediction interval (α=0.10) from online conformal; it widens in volatile patches and tightens in calm periods.
 
 Headline metrics for this window (also shown in the title):
 
-* **MAE=0.004424**, **RMSE=0.007464**, **Coverage≈0.904** (close to the 0.90 target).
-* **Compute time (offline)**: **p50≈0.1 ms**, **p95≈0.3 ms** per `process()` call.
+* MAE=0.004424, RMSE=0.007464, Coverage=0.904 (close to the 0.90 target).
+* Compute time (offline): p50=0.1 ms, p95=0.3 ms per `process()` call.
 
 Notes:
 
-* These latencies are **compute-time only** (no HTTP). End-to-end **service** latency over loopback measured separately: **p50≈0.99 ms**, **p95≈1.45 ms** (single worker, Intel i5-10400F OC \~4 GHz).
+* These latencies are compute-time only (no HTTP). End-to-end service latency over loopback measured separately: p50=0.99 ms, p95=1.45 ms (single worker, Intel i5-10400F OC \~4 GHz).
 * Change-point metrics are N/A here (no labeled CP truth on market data).
 
 
@@ -251,7 +251,7 @@ Artifacts (JSON metrics, plots) land in `./artifacts`. There’s also `scripts/r
 
 ### Baselines (point-error only, same windows)
 
-**Synthetic (`data/sim.csv`)**
+Synthetic (`data/sim.csv`)
 
 ```
 RW:   MAE=0.028626  RMSE=0.041461  (N=2999)
@@ -261,7 +261,7 @@ EWMA: MAE=0.021329  RMSE=0.030602  (alpha=0.2, N=2999)
 
 Takeaway: EWMA beats RW by \~25–26% on MAE/RMSE and beats AR(1) by \~17–19% on this stream (expected, given how the synthetic is generated).
 
-**AAPL 1h (start=2024-08-01)**
+AAPL 1h (start=2024-08-01)
 
 ```
 RW:   MAE=0.006386  RMSE=0.010225  (N=1848)
@@ -269,16 +269,16 @@ AR1:  MAE=0.004242  RMSE=0.007507  (N=1838)
 EWMA: MAE=0.004630  RMSE=0.007671  (alpha=0.2, N=1848)
 ```
 
-Takeaway: EWMA improves on RW (\~27% MAE, \~25% RMSE), but AR(1) is slightly better than EWMA on AAPL (\~9% lower MAE, \~2% lower RMSE). Interval calibration remains solid (coverage ≈0.904 @ α=0.10).
+Takeaway: EWMA improves on RW (\~27% MAE, \~25% RMSE), but AR(1) is slightly better than EWMA on AAPL (\~9% lower MAE, \~2% lower RMSE). Interval calibration remains solid (coverage =0.904 @ α=0.10).
 
 ---
 ## Notes on design
 
-* **Per-series sharding**: a lightweight lock per `series_id` prevents pointless global serialization.
-* **Idempotent truth**: replays are detected and return `idempotent: true`.
-* **Pending index**: truth can match by `prediction_id` or by `(series_id, target_timestamp)`.
-* **Uncertainty**: conformal intervals over absolute residuals; simple and fast.
-* **Detector**: z-score thresholding behind a BOCPD-style interface (no Bayesian inference).
+* Per-series sharding: a lightweight lock per `series_id` prevents pointless global serialization.
+* Idempotent truth: replays are detected and return `idempotent: true`.
+* Pending index: truth can match by `prediction_id` or by `(series_id, target_timestamp)`.
+* Uncertainty: conformal intervals over absolute residuals; simple and fast.
+* Detector: z-score thresholding behind a BOCPD-style interface (no Bayesian inference).
 
 ## Limitations 
 
