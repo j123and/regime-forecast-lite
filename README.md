@@ -21,7 +21,7 @@ source .venv/bin/activate
 pip install -U pip
 pip install -e ".[service,backtest]"  # add ,[dev] if you want tests/lint
 
-# 2) Run the API — single process only (no shared state across workers). Auth/rate limit off by default.
+# 2) Run the API, single process only (no shared state across workers). Auth/rate limit off by default.
 uvicorn service.app:app --host 0.0.0.0 --port 8000 --workers 1 &
 
 # DO NOT set --workers >1 unless you accept per-worker islands of state.
@@ -143,13 +143,13 @@ Prometheus text exposition.
 
 All optional. Defaults are sensible for local/dev.
 
-* `SERVICE_API_KEY` — if set, `/predict` and `/truth` require header `x-api-key: <key>`.
-* `RATE_LIMIT_PER_MINUTE` — per-key windowed counter; set `>0` to enable.
-* `SNAPSHOT_PATH` — JSON snapshot path for in-memory state on shutdown/start.
+* `SERVICE_API_KEY` if set, `/predict` and `/truth` require header `x-api-key: <key>`.
+* `RATE_LIMIT_PER_MINUTE` per-key windowed counter; set `>0` to enable.
+* `SNAPSHOT_PATH` JSON snapshot path for in-memory state on shutdown/start.
 * Best-effort on clean shutdown. On crash you may lose recent state; use periodic external snapshots if you care about durability.
-* `PENDING_CAP` — max pending predictions indexed for `/truth` matching.
-* `max_series` — LRU cap for series pipelines in memory.
-* `truth_ttl_sec`, `truth_max_ids` — idempotency cache tuning.
+* `PENDING_CAP` max pending predictions indexed for `/truth` matching.
+* `max_series` LRU cap for series pipelines in memory.
+* `truth_ttl_sec`, `truth_max_ids` idempotency cache tuning.
 
 Note: in test runs, auth and rate limiting are automatically controlled so unit tests don’t interfere with each other. In real runs, only `SERVICE_API_KEY` toggles auth, and rate limiting is off unless explicitly enabled.
 
@@ -220,7 +220,7 @@ python scripts/plot_backtest.py \
   --out artifacts/plot_aapl.png
 ```
 
-![AAPL 1h backtest — last 800 points](artifacts/plot_aapl.png)
+![AAPL 1h backtest, last 800 points](artifacts/plot_aapl.png)
 
 What you’re seeing:
 
