@@ -42,7 +42,7 @@ class Pipeline:
             min_warmup=int(self.cfg.get("min_warmup", 20)),
         )
 
-        # Conformal quantile (e.g., 0.90 → ~90% central interval when residuals are i.i.d.)
+        # Conformal quantile
         self.q = float(self.cfg.get("conformal_q", 0.9))
         self.maxlen = int(self.cfg.get("conformal_maxlen", 2000))
         self.global_res: deque[float] = deque(maxlen=self.maxlen)
@@ -51,7 +51,7 @@ class Pipeline:
             "volatile": deque(maxlen=self.maxlen),
         }
 
-        # Service book-keeping for /predict → /truth correlation
+        # Service book-keeping for /predict to /truth correlation
         self.pending: OrderedDict[str, tuple[float, str]] = OrderedDict()
         self.pending_cap = int(self.cfg.get("pending_cap", 4096))
 
@@ -62,7 +62,7 @@ class Pipeline:
         self._last_y_hat: float | None = None
         self._last_regime: str | None = None
 
-    # --------- service hooks ---------
+    #  service hooks 
     def register_prediction(self, pred_id: str, y_hat: float, regime: str) -> None:
         self.pending[pred_id] = (float(y_hat), str(regime))
         self.pending.move_to_end(pred_id)
@@ -91,7 +91,7 @@ class Pipeline:
         self._learn_residual(y_true, y_hat, regime)
         return True
 
-    # Backtests (and the service if desired) can call this without a prediction_id.
+    # Backtests can call this without a prediction_id.
     def update_truth(self, y: float, prediction_id: str | None = None) -> None:
         """
         Ingest realized truth for the most recent prediction (or for a specific prediction_id).
@@ -105,7 +105,7 @@ class Pipeline:
             return
         self._learn_residual(float(y), float(self._last_y_hat), self._last_regime)
 
-    # --------- main step ---------
+    #  main step 
     def process(self, tick: Tick) -> dict[str, Any]:
         x = _safe_float(tick["x"])
         f = self.fx.update(x)
@@ -162,7 +162,7 @@ class Pipeline:
             "degraded": degraded,
         }
 
-    # --------- snapshot state (buffers + pending only) ---------
+    #  snapshot state (buffers + pending only) 
     def state_dict(self) -> dict[str, Any]:
         return {
             "global_res": list(self.global_res),
