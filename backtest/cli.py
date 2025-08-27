@@ -20,7 +20,7 @@ def _read_dataframe(path: Path):
     """
     try:
         import pandas as pd  # type: ignore
-    except Exception as e:  # pragma: no cover
+    except Exception as e:
         raise RuntimeError(
             "pandas is required for backtesting. Install with: pip install '.[backtest]'"
         ) from e
@@ -39,7 +39,7 @@ def _stream_from_df(df) -> Iterator[dict[str, Any]]:
       - timestamp (optional): included verbatim if present
       - cp or is_cp (optional): ground-truth CP flag (0/1)
     """
-    # prefer vectorized access, but iterrows is fine for clarity here
+    # prefer vectorized access, but iterrows is fine
     has_ts = "timestamp" in df.columns
     has_cp = "cp" in df.columns or "is_cp" in df.columns
     cp_col = "cp" if "cp" in df.columns else ("is_cp" if "is_cp" in df.columns else None)
