@@ -13,7 +13,6 @@ def _read_yaml(p: Path) -> Dict[str, Any]:
 
 
 def _merge(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
-    # shallow is enough for this project; upgrade to deep-merge if you need it
     out = dict(a)
     out.update(b)
     return out
@@ -53,13 +52,11 @@ def load_config(
 
     Returns a (shallow) merged dict; also normalizes a few nested keys.
     """
-    # legacy alias support
     if config is None and "path" in kwargs and kwargs["path"]:
         config = kwargs["path"]
 
-    repo_root = Path(__file__).resolve().parents[1]  # project root
+    repo_root = Path(__file__).resolve().parents[1]  
 
-    # ---- explicit file (wins outright) ----
     if config:
         p = Path(config)
         if not p.is_file():
@@ -72,7 +69,7 @@ def load_config(
         if p.is_file():
             return _postprocess(_read_yaml(p))
 
-    # ---- layered load: default then optional profile ----
+
     cfg: Dict[str, Any] = {}
 
     fallback = repo_root / "config" / "default.yaml"
