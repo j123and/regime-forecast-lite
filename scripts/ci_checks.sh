@@ -9,7 +9,7 @@ if [[ ! -f "$DATA_CSV" ]]; then
   python -m data.sim_cp --n 3000 --out data/aapl_1h_logret.csv --seed 42 >/dev/null
 fi
 
-# 1) global coverage ±0.05 around 0.90
+# 1) global coverage 0.05 around 0.90
 python - <<'PY'
 from backtest.runner import BacktestRunner; from core.config import load_config
 from core.pipeline import Pipeline; from data.replay import Replay; import sys
@@ -18,7 +18,7 @@ cfg=load_config(profile="market"); m,_=BacktestRunner(alpha=0.1,cp_tol=10).run(
 cov=float(m["coverage"]); print({"coverage":cov}); sys.exit(0 if abs(cov-0.9)<=0.05 else 1)
 PY
 
-# 2) rolling coverage (200) ≥0.85
+# 2) rolling coverage (200) >=0.85
 python - <<'PY'
 from backtest.runner import BacktestRunner; from core.config import load_config
 from core.pipeline import Pipeline; from data.replay import Replay; import pandas as pd, sys
@@ -74,7 +74,7 @@ p50=float(m["latency_p50_ms"]); p95=float(m["latency_p95_ms"]); print({"p50":p50
 sys.exit(0 if (p50<=12.0 and p95<=25.0) else 1)
 PY
 
-# 6) per-regime coverage ≥0.85 (skip if no regimes)
+# 6) per-regime coverage >=0.85 (skip if no regimes)
 python - <<'PY'
 from backtest.runner import BacktestRunner; from core.config import load_config
 from core.pipeline import Pipeline; from data.replay import Replay; import pandas as pd, sys
