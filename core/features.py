@@ -51,7 +51,7 @@ class FeatureExtractor:
         self.count = 0
         self.m = 0.0  # E[x]
         self.s = 0.0  # E[x^2]
-        self._prev = None  # placeholder if you later want ac1
+        self._prev = None  # placeholder if later ac1
 
     def _update_core(self, x: float) -> dict[str, Any]:
         a = self.alpha
@@ -90,7 +90,6 @@ class FeatureExtractor:
             x = _sf(x_or_tick.get("x", 0.0))
             cov = x_or_tick.get("covariates") or {}
             out = self._update_core(x)
-            # realized variance: prefer covariate if supplied, else alias to var
             try:
                 rv_val = float(cov.get("rv")) if isinstance(cov, Mapping) and "rv" in cov else out["ewm_var"]
             except Exception:
