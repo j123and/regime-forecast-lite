@@ -1,4 +1,4 @@
-# service/app.py  (junior-grade, sharded & guarded, pytest-friendly auth+RL)
+# service/app.py  
 from __future__ import annotations
 
 import json
@@ -38,14 +38,14 @@ async def lifespan(app: FastAPI):
         # save snapshot on shutdown
         _save_snapshot()
 
-# ---------- app & logging ----------
+#  app & logging 
 app = FastAPI(lifespan=lifespan)
 
 logger = logging.getLogger("regime-forecast-lite")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
 
-# ---------- config ----------
+#  config 
 cfg = load_config()
 
 def _int_from_env_or_cfg(env_name: str, cfg_key: str, default: int) -> int:
@@ -60,7 +60,7 @@ def _int_from_env_or_cfg(env_name: str, cfg_key: str, default: int) -> int:
     except Exception:
         return default
 
-# ---------- Prometheus: PRIVATE registry to avoid duplicates on reload ----------
+#  Prometheus: PRIVATE registry to avoid duplicates on reload 
 PROM_REG = CollectorRegistry()
 REQS = Counter("requests_total", "Total requests", ["endpoint"], registry=PROM_REG)
 SERVICE_LAT = Histogram(
@@ -70,7 +70,7 @@ SERVICE_LAT = Histogram(
     registry=PROM_REG,
 )
 
-# ---------- series-sharded pipelines ----------
+#  series-sharded pipelines 
 _MAX_SERIES = _int_from_env_or_cfg("MAX_SERIES", "max_series", 1024)
 _pipes: OrderedDict[str, Pipeline] = OrderedDict()
 _pipe_locks: defaultdict[str, Lock] = defaultdict(Lock)
@@ -85,7 +85,7 @@ def _get_pipe(series_id: str) -> Pipeline:
         _pipes.popitem(last=False)
     return p
 
-# ---------- idempotency with TTL ----------
+#  idempotency with TTL 
 _APPLIED: OrderedDict[str, float] = OrderedDict()
 _APPLIED_TTL = float(cfg.get("truth_ttl_sec", 3600))
 _APPLIED_MAX = int(cfg.get("truth_max_ids", 200_000))
@@ -116,7 +116,7 @@ def _mark_applied(pid: str) -> None:
     _APPLIED.move_to_end(pid)
     _sweep_applied()
 
-# ---------- pending indices ----------
+#  pending indices 
 _PENDING_BY_KEY: OrderedDict[tuple[str, str], str] = OrderedDict()
 _PENDING_CAP = _int_from_env_or_cfg("PENDING_CAP", "pending_cap", 4096)
 
@@ -169,7 +169,7 @@ def _resolve_pred_id(prediction_id: str | None, series_id: str | None, target_ts
         return _PENDING_BY_KEY.get((series_id, target_ts))
     return None
 
-# ---------- auth + rate limit (pytest-friendly) ----------
+#  auth + rate limit (pytest-friendly) 
 def _is_pytest() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ
 
@@ -239,14 +239,14 @@ def _auth_and_rate_limit(request: Request, endpoint: str) -> None:
         while len(_RL_BUCKET) > _RL_MAX_KEYS:
             _RL_BUCKET.popitem(last=False)
 
-# ---------- utils ----------
+#  utils 
 def _to_float(v: Any, default: float = 0.0) -> float:
     try:
         return float(v)
     except Exception:
         return default
 
-# ---------- snapshot / restore ----------
+#  snapshot / restore 
 _SNAPSHOT_PATH = os.getenv("SNAPSHOT_PATH") or str(cfg.get("snapshot_path", ""))
 
 @app.on_event("startup")
@@ -309,7 +309,7 @@ def _save_snapshot() -> None:
     except Exception as e:
         logger.warning(f'{{"evt":"snapshot_save_error","err":"%s"}}', str(e))
 
-# ---------- endpoints ----------
+#  endpoints 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     REQS.labels("healthz").inc()
