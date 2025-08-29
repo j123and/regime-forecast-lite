@@ -196,12 +196,11 @@ CP: (no ground-truth labels -> N/A)
 N=1848
 ```
 
-Service latency (HTTP, single worker, local)
-
-```
-Latency service_ms: p50=0.99 ms, p95=1.45 ms, N=1000
-Machine: Intel i5-10400F (OC ~4 GHz), local loopback
-```
+Service latency (HTTP, single worker, loopback)
+E2E /predict: p50=1.7 ms, p95=2.0 ms (N=4000)
+E2E /truth:   p50=1.6 ms, p95=1.9 ms (N=4000)
+Server compute (latency_ms.service_ms): p50=0.07 ms, p95=0.10 ms
+Machine: Intel i5-10400F (~4 GHz), uvicorn single worker; includes JSON encode/decode
 
 Notes: Backtest latencies exclude HTTP; the service benchmark measures JSON encode/decode + request handling over loopback. CP metrics on market data are N/A (no labels). On synthetic, low CP precision indicates detector chatter; tune threshold/cooldown if you care about precision.
 
